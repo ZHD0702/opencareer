@@ -12,18 +12,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-FLASK_AVAILABLE = False
-app = None
-
-try:
-    from flask import Flask, request, jsonify, render_template
-    FLASK_AVAILABLE = True
-except ImportError:
-    print("[警告] Flask 未安装，Web 服务将不可用")
-
-if FLASK_AVAILABLE:
-    app = Flask(__name__)
-
 
 class ExtractedInfo(BaseModel):
     """提取的信息结构"""
@@ -324,56 +312,7 @@ class EmotionalChatbot:
         print("记忆已清除")
 
 
-# 全局聊天机器人实例
-chatbot = EmotionalChatbot()
-
-
-# Flask API 路由
-if FLASK_AVAILABLE and app:
-    @app.route('/')
-    def index():
-        """主页"""
-        return render_template('index.html')
-
-    @app.route('/api/chat', methods=['POST'])
-    def api_chat():
-        """处理聊天请求"""
-        try:
-            data = request.get_json()
-            message = data.get('message', '').strip()
-
-            if not message:
-                return jsonify({'success': False, 'error': '消息不能为空'})
-
-            response = chatbot.chat(message)
-            return jsonify({'success': True, 'response': response})
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return jsonify({'success': False, 'error': str(e)})
-
-    @app.route('/api/memory', methods=['GET'])
-    def api_memory():
-        """获取记忆摘要"""
-        try:
-            summary = chatbot.get_memory_summary()
-            details = chatbot.get_detailed_memory()
-            return jsonify({'success': True, 'summary': summary, 'details': details})
-        except Exception as e:
-            return jsonify({'success': False, 'error': str(e)})
-
-    @app.route('/api/clear', methods=['POST'])
-    def api_clear():
-        """清除记忆"""
-        try:
-            chatbot.clear_memory()
-            return jsonify({'success': True})
-        except Exception as e:
-            return jsonify({'success': False, 'error': str(e)})
-
-
-def main_cli():
+def main():
     """命令行交互模式"""
     print("=" * 50)
     print("情感聊天小助手 (DeepSeek V3 + 智能记忆)")
@@ -386,8 +325,10 @@ def main_cli():
     print("  - 'memory': 查看记忆摘要")
     print("  - 'detail': 查看详细记忆")
     print("  - 'clear': 清除所有记忆")
-    print("  - 'web': 启动 Web 服务器")
     print("=" * 50)
+
+    # 初始化聊天机器人
+    chatbot = EmotionalChatbot()
 
     while True:
         try:
@@ -421,17 +362,6 @@ def main_cli():
                 print("\n记忆已清除")
                 continue
 
-            elif user_input.lower() == 'web':
-                if not FLASK_AVAILABLE or not app:
-                    print("\n[错误] Flask 未安装，无法启动 Web 服务器")
-                    print("请运行: pip install flask")
-                    continue
-                print("\n启动 Web 服务器...")
-                print("访问地址: http://localhost:5000")
-                print("按 Ctrl+C 停止服务器")
-                app.run(host='0.0.0.0', port=5000, debug=False)
-                continue
-
             elif not user_input:
                 continue
 
@@ -445,27 +375,6 @@ def main_cli():
             print(f"\n抱歉，出现了一些问题: {e}")
 
 
-def main_web():
-    """Web服务器模式"""
-    if not FLASK_AVAILABLE or not app:
-        print("[错误] Flask 未安装，无法启动 Web 服务器")
-        print("请运行: pip install flask")
-        return
-
-    print("=" * 50)
-    print("情感聊天小助手 (DeepSeek V3 + 智能记忆)")
-    print("=" * 50)
-    print("启动 Web 服务器...")
-    print("访问地址: http://localhost:5000")
-    print("=" * 50)
-
-    app.run(host='0.0.0.0', port=5000, debug=False)
-
-
 if __name__ == "__main__":
-    import sys
+    main()
 
-    if len(sys.argv) > 1 and sys.argv[1] == 'web':
-        main_web()
-    else:
-        main_cli()
