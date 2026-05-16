@@ -5,7 +5,8 @@ name: Python application
 
 on:
   push:
-    branches: [ "feature/langchain+mcp" ]
+    branches: ["main"]
+  workflow_dispatch:  # 这行就是开启手动触发的关键！
 
 permissions:
   contents: read
@@ -16,7 +17,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
         python-version: "3.10"
