@@ -1,0 +1,35 @@
+# Skill Definitions
+# Each skill is automatically converted to an MCP Tool
+
+skills:
+  job_prep_full:
+    name: "求职全流程准备"
+    description: "从简历分析到面试准备的完整流程：先分析简历给出评分和改进建议，再提供职业发展建议，最后进行面试准备"
+    parameters:
+      resume_text:
+        type: string
+        description: "简历文本内容"
+        required: true
+      target_role:
+        type: string
+        description: "目标岗位（如：软件工程师、产品经理）"
+        required: false
+      user_input:
+        type: string
+        description: "用户的需求或问题描述"
+        required: true
+    steps:
+      - tool: resume_analysis
+        args:
+          resume_text: "{resume_text}"
+          target_role: "{target_role}"
+      - tool: career_advice
+        args:
+          user_input: "{user_input}"
+      - tool: interview_prep
+        args:
+          role: "{target_role}"
+          question_type: "通用"
+      - tool: emotion_support
+        args:
+          user_input: "{user_input}"
