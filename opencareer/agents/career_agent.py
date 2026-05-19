@@ -190,13 +190,29 @@ class CareerAgent:
             # Execute tool calls
             tool_results = await self._execute_tool_calls(response.tool_calls)
 
-            # Feed tool results back to LLM for final response
-            messages.append(response)
+            # Check for markdown_skill results with direct output
+            direct_outputs = []
             for tr in tool_results:
-                messages.append(tr)
+                try:
+                    import json
+                    result_data = json.loads(tr.content)
+                    if result_data.get("_type") == "markdown_skill":
+                        output = result_data.get("output")
+                        if output:
+                            direct_outputs.append(output)
+                except (json.JSONDecodeError, AttributeError):
+                    pass
 
-            final_response = await llm_with_tools.ainvoke(messages)
-            response_text = final_response.content
+            if direct_outputs:
+                response_text = "\n\n".join(direct_outputs)
+            else:
+                # Feed tool results back to LLM for final response
+                messages.append(response)
+                for tr in tool_results:
+                    messages.append(tr)
+
+                final_response = await llm_with_tools.ainvoke(messages)
+                response_text = final_response.content
         else:
             response_text = response.content
 
@@ -233,14 +249,32 @@ class CareerAgent:
             yield f"\n[调用工具: {', '.join(tc['name'] for tc in response.tool_calls)}]\n"
 
             tool_results = await self._execute_tool_calls(response.tool_calls)
-            messages.append(response)
-            for tr in tool_results:
-                messages.append(tr)
 
-            # Stream final response
-            async for chunk in llm_with_tools.astream(messages):
-                if chunk.content:
-                    yield chunk.content
+            # Check for markdown_skill results with direct output
+            direct_outputs = []
+            for tr in tool_results:
+                try:
+                    import json
+                    result_data = json.loads(tr.content)
+                    if result_data.get("_type") == "markdown_skill":
+                        output = result_data.get("output")
+                        if output:
+                            direct_outputs.append(output)
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+
+            if direct_outputs:
+                response_text = "\n\n".join(direct_outputs)
+                yield response_text
+            else:
+                messages.append(response)
+                for tr in tool_results:
+                    messages.append(tr)
+
+                # Stream final response
+                async for chunk in llm_with_tools.astream(messages):
+                    if chunk.content:
+                        yield chunk.content
         else:
             response_text = response.content or ""
             # For non-streaming initial response, yield all at once

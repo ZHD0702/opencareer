@@ -1,0 +1,91 @@
+{
+  "format": "chinese",
+  "contact": {
+    "name": "李明",
+    "title": "Java后端开发（校招应届生）",
+    "location": "南京",
+    "phone": "",
+    "email": "liming2026@163.com"
+  },
+  "summary": "计算机科学与技术专业大四学生，具备扎实的Java编程基础和项目实践经验。熟悉Spring Boot、MySQL、Redis等主流后端技术栈，有企业级项目开发经验。在校期间获得校级学业三等奖学金，具备良好的学习能力和团队协作精神，致力于成为一名优秀的Java后端开发工程师。",
+  "sections": [
+    {
+      "title": "教育背景",
+      "items": [
+        {
+          "heading": "南京信息工程大学 | 计算机科学与技术 | 本科 | 2022.09 - 2026.06",
+          "bullets": []
+        }
+      ]
+    },
+    {
+      "title": "经历亮点",
+      "items": [
+        {
+          "heading": "核心经历",
+          "bullets": [
+            "鼎信科技 | Java后端开发实习生 | 2024.09 - 2025.04",
+            "参与校园在线商城管理系统项目的后端开发工作，负责商品管理、订单处理等核心模块的设计与实现",
+            "基于Spring Boot + MyBatis Plus搭建后端服务框架，实现RESTful API接口开发",
+            "使用MySQL进行数据库设计与优化，编写高效SQL语句，确保系统数据一致性与查询性能",
+            "配合前端团队完成接口联调，参与系统测试与Bug修复，保障项目按时交付"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "项目经历",
+      "items": [
+        {
+          "heading": "代表项目",
+          "bullets": [
+            "校园在线商城管理系统 | 2024.09 - 2025.04",
+            "项目描述：一个面向高校师生的在线购物平台，支持商品浏览、购物车、订单管理、支付对接等功能",
+            "技术栈：Spring Boot、Spring Cloud、MyBatis Plus、MySQL、Redis、RabbitMQ、Vue.js",
+            "负责后端核心业务模块开发，包括用户认证、商品管理、购物车与订单流程设计",
+            "基于Redis实现商品缓存与Session共享，提升系统响应速度与并发能力",
+            "使用RabbitMQ处理订单异步消息，实现订单超时自动取消等业务逻辑",
+            "参与数据库表结构设计，优化慢查询SQL，系统QPS提升约30%"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "技能清单",
+      "items": [
+        {
+          "heading": "核心技能",
+          "bullets": [
+            "Java（熟练掌握）",
+            "Spring Boot / Spring Cloud",
+            "MyBatis Plus",
+            "MySQL（数据库设计与优化）",
+            "Redis缓存技术",
+            "RabbitMQ消息队列",
+            "Git / Maven",
+            "Linux基本操作",
+            "Vue.js（了解）"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "证书与补充信息",
+      "items": [
+        {
+          "heading": "证书",
+          "bullets": [
+            "校级学业三等奖学金",
+            "英语四级（CET-4）",
+            "计算机等级考试二级（Java语言程序设计）"
+          ]
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "job_type": "校招应届生",
+    "industry": "互联网/IT",
+    "experience_years": "应届生"
+  }
+}
