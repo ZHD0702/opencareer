@@ -1,7 +1,7 @@
 # emotional_chatbot.py
 from langchain_openai import ChatOpenAI
 from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from pydantic import BaseModel, Field
 from typing import List
@@ -73,7 +73,7 @@ class EmotionalChatbot:
 
         # 创建信息提取的提示模板
         self.extraction_prompt = ChatPromptTemplate.from_messages([
-            ("system", """你是一个信息提取专家。从用户的对话中提取以下类型的信息：
+            ("system", """你是一个信息提取专家。严格从用户的对话中提取明确表述的真实信息，不推测、不添加、不编造。从用户的对话中提取以下类型的信息：
 
 1. **用户信息**: 职业、居住地、年龄、家庭状况、教育背景等个人基本信息
 2. **偏好**: 兴趣爱好、喜欢的活动、食物、音乐、书籍、电影等
@@ -106,6 +106,7 @@ class EmotionalChatbot:
 {user_context}
 
 请以温暖、共情的方式回应用户。如果用户分享了重要信息（如兴趣爱好、重要事件、个人偏好等），要记住并在未来的对话中体现出来。"""),
+            MessagesPlaceholder("history"),  # BUGFIX: 传入对话历史，修复之前构建了但未使用的短期记忆
             ("human", "{input}")
         ])
 
@@ -255,18 +256,11 @@ class EmotionalChatbot:
         # 获取用户上下文
         user_context = self._get_user_context()
 
-        # 将历史消息添加到提示中
-        messages = []
-        for msg in self.message_history.messages:
-            if isinstance(msg, HumanMessage):
-                messages.append({"type": "human", "content": msg.content})
-            elif isinstance(msg, AIMessage):
-                messages.append({"type": "ai", "content": msg.content})
-
-        # 生成回复
+        # 生成回复，传入对话历史以维持多轮上下文
         response = self.chain.invoke({
             "input": user_input,
-            "user_context": user_context
+            "user_context": user_context,
+            "history": list(self.message_history.messages),  # BUGFIX: 之前构建了 messages 但未传入，导致短期记忆丢失
         })
         response_text = response.content if hasattr(response, 'content') else str(response)
 
@@ -315,7 +309,7 @@ class EmotionalChatbot:
 def main():
     """命令行交互模式"""
     print("=" * 50)
-    print("情感聊天小助手 (DeepSeek V3 + 智能记忆)")
+    print("情感聊天小助手 (DeepSeek V4 + 智能记忆)")
     print("=" * 50)
     print("我是你的情感陪伴助手，随时倾听你的心声")
     print("我会智能记住你分享的重要信息")
