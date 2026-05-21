@@ -42,14 +42,14 @@ class EmotionalChatbot:
         if self.use_deepseek:
             self.llm = ChatOpenAI(
                 temperature=0.7,
-                model="deepseek-chat",
+                model="deepseek-v4-pro",
                 api_key=self.api_key,
                 base_url="https://api.deepseek.com"
             )
             # 用于信息提取的LLM（温度设置更低以获得更准确的提取）
             self.extraction_llm = ChatOpenAI(
                 temperature=0.1,
-                model="deepseek-chat",
+                model="deepseek-v4-pro",
                 api_key=self.api_key,
                 base_url="https://api.deepseek.com"
             )
