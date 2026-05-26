@@ -32,6 +32,13 @@ logger = logging.getLogger("opencareer.agents.career_agent")
 SYSTEM_PROMPT = get_system_prompt()
 
 
+def _sanitize_text(text: str) -> str:
+    """Remove surrogate characters that cause UTF-8 encoding errors with DeepSeek API."""
+    if not text:
+        return text
+    return text.encode("utf-8", errors="ignore").decode("utf-8")
+
+
 class CareerAgent:
     """LangChain agent with MCP tool integration for career companion.
 
@@ -216,6 +223,8 @@ class CareerAgent:
         else:
             response_text = response.content
 
+        response_text = _sanitize_text(response_text)
+
         # Store in chat history
         self.message_history.add_user_message(user_input)
         self.message_history.add_ai_message(response_text)
@@ -265,7 +274,7 @@ class CareerAgent:
 
             if direct_outputs:
                 response_text = "\n\n".join(direct_outputs)
-                yield response_text
+                yield _sanitize_text(response_text)
             else:
                 messages.append(response)
                 for tr in tool_results:
@@ -274,18 +283,19 @@ class CareerAgent:
                 # Stream final response
                 async for chunk in llm_with_tools.astream(messages):
                     if chunk.content:
-                        yield chunk.content
+                        yield _sanitize_text(chunk.content)
         else:
             response_text = response.content or ""
             # For non-streaming initial response, yield all at once
-            yield response_text
+            yield _sanitize_text(response_text)
 
         # Store in history
         self.message_history.add_user_message(user_input)
-        if response.content:
-            self.message_history.add_ai_message(response.content)
+        cleaned_content = _sanitize_text(response.content or "")
+        if cleaned_content:
+            self.message_history.add_ai_message(cleaned_content)
 
-        self._update_memory(user_input, response.content or "")
+        self._update_memory(user_input, cleaned_content)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -293,6 +303,7 @@ class CareerAgent:
 
     def _build_messages(self, user_input: str) -> list:
         """Build the message list for LLM invocation."""
+        user_input = _sanitize_text(user_input)
         user_context = self._get_user_context()
 
         system_content = SYSTEM_PROMPT
@@ -376,6 +387,7 @@ class CareerAgent:
     def _extract_important_info(self, user_input: str, ai_response: str) -> None:
         """使用LLM从对话中提取重要信息"""
         try:
+            user_input = _sanitize_text(user_input)
             # 构建提取提示
             messages = self.extraction_prompt.format_messages(user_input=user_input)
 
@@ -383,7 +395,7 @@ class CareerAgent:
             response = self.extraction_llm.invoke(messages)
 
             # 解析JSON响应
-            extracted_text = response.content.strip()
+            extracted_text = _sanitize_text(response.content.strip())
 
             # 尝试提取JSON（处理可能的markdown代码块）
             if "```json" in extracted_text:

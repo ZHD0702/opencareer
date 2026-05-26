@@ -11,7 +11,9 @@
       "Bash(pip install:*)",
       "Bash(curl:*)",
       "Bash(taskkill:*)",
-      "Bash(cmd:*)"
+      "Bash(cmd:*)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
