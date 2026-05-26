@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:8001/mcp)",
+      "Bash(pip show:*)",
+      "Bash(python:*)",
+      "Bash(curl -s http://127.0.0.1:8001/mcp)",
+      "Bash(mkdir -p F:/opencareer/resume-career/scripts)",
+      "Bash(mkdir -p F:/opencareer/resume-career/references)",
+      "Bash(mkdir -p F:/opencareer/resume-career/examples)",
+      "Bash(pip install:*)",
+      "Bash(curl:*)",
+      "Bash(taskkill:*)",
+      "Bash(cmd:*)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
