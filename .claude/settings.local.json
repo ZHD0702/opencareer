@@ -13,7 +13,12 @@
       "Bash(taskkill:*)",
       "Bash(cmd:*)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git checkout *)",
+      "Bash(pkill -f \"opencareer/mcp/server.py\")",
+      "Bash(pkill -f \"opencareer.mcp.server\")",
+      "Bash(pkill -f \"opencareer/mcp/server\")",
+      "Bash(netstat -ano)"
     ]
   }
 }
