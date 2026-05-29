@@ -4,8 +4,6 @@ class SkillRegistry:
         """扫描 skills/ 目录下的 YAML 和 SKILL.md"""
         skills = {}
         
-        # 加载旧的 skills.yaml
-        skills.update(self._load_yaml_skills())
         
         # 扫描每个文件夹的 SKILL.md
         for skill_dir in self.skills_dir.iterdir():
