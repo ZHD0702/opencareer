@@ -157,6 +157,27 @@ venv/
 env.bak/
 venv.bak/
 
+# API Keys and Secrets
+# WARNING: Never commit API keys or secrets to Git!
+.env.local
+.env.*.local
+.env.dev
+.env.prod
+.env.staging
+*.secret
+*.key
+*.pem
+*.priv
+*.p12
+
+# DeepSeek API Key - DO NOT COMMIT!
+# Make sure your DeepSeek API Key is only in .env files, not in code!
+career_memory.json
+*memory*.json
+*.db
+*.sqlite
+*.sqlite3
+
 # Spyder project settings
 .spyderproject
 .spyproject
