@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: opencareer-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
+      - MCP_URL=${MCP_URL:-http://localhost:8001/mcp}
+      - USE_MCP=${USE_MCP:-true}
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/knowledge:/app/knowledge
+    restart: unless-stopped
+
+  mcp-server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: opencareer-mcp
+    command: ["python", "-m", "careers.mcp.server"]
+    ports:
+      - "8001:8001"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    container_name: opencareer-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  knowledge-data:
