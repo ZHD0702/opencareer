@@ -16,9 +16,6 @@ logger = logging.getLogger(__name__)
 # 全局 CareerAgent 实例管理（每个会话一个实例）
 _career_agents = {}
 
-# 全局碎片化器
-_fragmenter = TextFragmenter()
-
 
 async def _get_career_agent(session_id: str):
     """获取或创建 CareerAgent 实例"""
@@ -133,8 +130,9 @@ async def chat_stream(session_id: str, request: Request):
                     full_text = "".join(full_ai_response)
                     logger.info(f"AI回复完成: {len(full_text)} 字符，开始碎片化处理")
                     
-                    # 使用碎片化器处理文本
-                    fragments = _fragmenter.fragment_with_particles(full_text)
+                    # 使用碎片化器处理文本（每次创建新实例确保加载最新代码）
+                    fragmenter = TextFragmenter()
+                    fragments = fragmenter.fragment_with_particles(full_text)
                     
                     logger.info(f"碎片化完成: 生成 {len(fragments)} 个碎片")
                     

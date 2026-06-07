@@ -13,23 +13,31 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
-      - MCP_URL=${MCP_URL:-http://localhost:8001/mcp}
-      - USE_MCP=${USE_MCP:-true}
+      - CAREER_MCP_URL=http://mcp-server:8001/mcp
+      - CAREER_USE_MCP=true
+      - CAREER_MCP_HOST=127.0.0.1
+      - CAREER_MCP_PORT=8001
     volumes:
       - ./backend/data:/app/data
       - ./backend/knowledge:/app/knowledge
+    depends_on:
+      - mcp-server
     restart: unless-stopped
 
   mcp-server:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: python:3.11-slim
     container_name: opencareer-mcp
-    command: ["python", "-m", "careers.mcp.server"]
+    working_dir: /app
+    command: >
+      bash -c "pip install fastmcp mcp langchain langchain-openai langchain-mcp-adapters openai python-dotenv reportlab pyyaml &&
+               python -c 'import sys; sys.path.insert(0, \"/app/opencareer\"); from opencareer.mcp.server import main; main()'"
     ports:
       - "8001:8001"
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    volumes:
+      - ./backend:/app
+      - ./opencareer:/app/opencareer:ro
     restart: unless-stopped
 
   frontend:
@@ -39,6 +47,8 @@ services:
     container_name: opencareer-frontend
     ports:
       - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
     depends_on:
       - backend
     restart: unless-stopped

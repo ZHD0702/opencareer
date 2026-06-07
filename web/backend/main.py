@@ -10,11 +10,11 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import traceback
 
-from api.routes import chat, sessions, emotion, skill, resume
+from api.routes import chat, sessions, emotion, skill, resume, mcp
 from api.routes import careers, orchestrator
 from db.crud import init_sync_db
 from careers_config import config
-from adapters.mcp_service import start_mcp_server, stop_mcp_server
+from adapters.mcp_service import start_mcp_server, stop_mcp_server, get_mcp_service
 
 # 先加载项目根目录的 .env
 from pathlib import Path
@@ -36,25 +36,33 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("=" * 60)
     logger.info("OpenCareer API 启动中...")
+    logger.info("=" * 60)
     init_sync_db()
-    logger.info("数据库初始化完成")
+    logger.info("✅ 数据库初始化完成")
     
     # 启动 MCP 服务器（如果启用）
     if config.USE_MCP:
+        logger.info(f"📦 正在启动 MCP 服务器 (URL: {config.MCP_URL})...")
         mcp_started = await start_mcp_server()
         if mcp_started:
-            logger.info("MCP 服务器启动成功")
+            logger.info("✅ MCP 服务器启动成功 - resume-skill 已就绪")
         else:
-            logger.warning("MCP 服务器启动失败 - 将在没有 MCP 工具的情况下运行")
+            logger.warning("⚠️ MCP 服务器启动失败 - 将使用无工具模式运行")
+    else:
+        logger.info("ℹ️ MCP 功能已禁用 (CAREER_USE_MCP=false)")
     
     yield
     
+    logger.info("=" * 60)
     logger.info("OpenCareer API 关闭中...")
+    logger.info("=" * 60)
     
     # 关闭 MCP 服务器
     if config.USE_MCP:
         await stop_mcp_server()
+        logger.info("✅ MCP 服务器已关闭")
 
 
 app = FastAPI(
@@ -142,6 +150,7 @@ app.include_router(careers.router, prefix="/api", tags=["careers"])
 app.include_router(emotion.router, prefix="/api", tags=["emotion"])
 app.include_router(skill.router, prefix="/api", tags=["skill"])
 app.include_router(resume.router, prefix="/api", tags=["resume"])
+app.include_router(mcp.router, prefix="/api", tags=["mcp"])
 app.include_router(orchestrator.router, prefix="/api", tags=["orchestrator", "llm", "knowledge"])
 
 
@@ -152,7 +161,17 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    """健康检查端点 - 包含 MCP 服务状态"""
+    mcp_service = await get_mcp_service()
+    mcp_status = {
+        "mcp_enabled": config.USE_MCP,
+        "mcp_running": mcp_service.is_running() if mcp_service else False,
+        "mcp_port": config.MCP_PORT if config.USE_MCP else None,
+    }
+    return {
+        "status": "healthy",
+        "mcp": mcp_status if config.USE_MCP else {"enabled": False}
+    }
 
 
 @app.middleware("http")

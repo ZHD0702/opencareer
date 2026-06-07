@@ -29,7 +29,7 @@ class MCPService:
     async def start_server(self):
         """启动 MCP 服务器 - 使用外面的 opencareer/mcp/server.py"""
         try:
-            project_root = Path(__file__).resolve().parent.parent.parent  # F:\opencareer\web\backend\adapters\mcp_service.py -> F:\opencareer
+            project_root = Path(__file__).resolve().parents[3]
             mcp_script = project_root / "opencareer" / "mcp" / "server.py"
             
             if not mcp_script.exists():
@@ -45,7 +45,8 @@ class MCPService:
             self.process = subprocess.Popen(
                 [
                     sys.executable,
-                    str(mcp_script),
+                    "-m",
+                    "opencareer.mcp.server",
                 ],
                 cwd=str(project_root),
                 stdout=subprocess.PIPE,
@@ -89,6 +90,10 @@ class MCPService:
     
     def is_running(self) -> bool:
         """检查 MCP 服务器是否运行中"""
+        # 先检查端口是否被占用
+        if not self.is_port_available():
+            return True
+        # 再检查我们自己的进程引用
         return self.process is not None and self.process.poll() is None
 
 

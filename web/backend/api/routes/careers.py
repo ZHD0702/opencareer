@@ -1,8 +1,13 @@
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 import json
 import logging
-from typing import Optional
+import asyncio
+import os
+import sys
+from pathlib import Path
+from typing import Optional, Any
 
 from api.exceptions import SessionNotFoundException, LLMServiceException
 from db.crud import save_message, get_messages, get_session
@@ -11,6 +16,69 @@ from careers_config import config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+JOB_DATA_PATH = PROJECT_ROOT / "岗位匹配数据.xlsx"
+MATCH_TEMP_DIR = Path(__file__).resolve().parents[2] / "data" / "match"
+
+
+class CareerMatchRequest(BaseModel):
+    mode: str = "auto"
+    top_n: int = 10
+    coarse_n: int = 30
+    final_n: int = 5
+
+
+def _normalize_memory_for_matcher(memory: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(memory)
+    goals = memory.get("goals", [])
+    if isinstance(goals, list):
+        normalized["goals"] = {}
+        for item in goals:
+            if isinstance(item, dict):
+                ts = item.get("timestamp", "")
+                normalized["goals"][ts] = item.get("content", str(item))
+            else:
+                normalized["goals"][str(len(normalized["goals"]))] = str(item)
+    return normalized
+
+
+def _dataframe_records(df) -> list[dict[str, Any]]:
+    records = []
+    for row in df.to_dict(orient="records"):
+        cleaned = {}
+        for key, value in row.items():
+            if hasattr(value, "item"):
+                value = value.item()
+            if value != value:
+                value = None
+            cleaned[str(key)] = value
+        records.append(cleaned)
+    return records
+
+
+def _run_local_match(memory_path: Path, top_n: int) -> list[dict[str, Any]]:
+    from career_matcher import match_career
+
+    result = match_career(
+        excel_path=str(JOB_DATA_PATH),
+        memory_path=str(memory_path),
+        top_n=top_n,
+    )
+    return _dataframe_records(result)
+
+
+def _run_ai_match(memory_path: Path, coarse_n: int, final_n: int) -> str:
+    from career_matcher_ai import ai_match_career
+
+    return ai_match_career(
+        excel_path=str(JOB_DATA_PATH),
+        memory_path=str(memory_path),
+        coarse_n=coarse_n,
+        final_n=final_n,
+    )
 
 # 全局 CareerAgent 实例管理（每个会话一个实例，或单例）
 _career_agents = {}
@@ -141,6 +209,72 @@ async def get_careers_config():
         "phase": "phase_3",
         "status": "career_agent_integrated"
     }
+
+
+@router.post("/careers/match/{session_id}")
+async def match_careers(session_id: str, payload: CareerMatchRequest):
+    """Run the CLI job matcher through the GUI backend."""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found.")
+
+    if not JOB_DATA_PATH.exists():
+        raise HTTPException(status_code=404, detail=f"Job data file not found: {JOB_DATA_PATH}")
+
+    agent = await _get_career_agent(session_id)
+    memory = getattr(agent, "long_term_memory", {}) or {}
+    if not memory.get("user_info") and not memory.get("goals") and not memory.get("preferences"):
+        raise HTTPException(status_code=400, detail="No user profile found. Chat with the assistant first.")
+
+    MATCH_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    memory_path = MATCH_TEMP_DIR / f"{session_id}.json"
+    memory_path.write_text(
+        json.dumps(_normalize_memory_for_matcher(memory), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    mode = payload.mode.lower()
+    try:
+        if mode in {"auto", "ai"}:
+            try:
+                report = await asyncio.to_thread(
+                    _run_ai_match,
+                    memory_path,
+                    payload.coarse_n,
+                    payload.final_n,
+                )
+                return {
+                    "success": True,
+                    "mode": "ai",
+                    "report": report,
+                    "recommendations": [],
+                    "fallback": False,
+                }
+            except Exception as exc:
+                if mode == "ai":
+                    raise
+                logger.warning("AI career match failed, falling back to local matcher: %s", exc)
+
+        recommendations = await asyncio.to_thread(_run_local_match, memory_path, payload.top_n)
+        return {
+            "success": True,
+            "mode": "local",
+            "report": "",
+            "recommendations": recommendations,
+            "fallback": mode == "auto",
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Career match failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Career match failed: {exc}") from exc
+    finally:
+        try:
+            os.remove(memory_path)
+        except OSError:
+            pass
 
 
 @router.get("/careers/memory/{session_id}")
