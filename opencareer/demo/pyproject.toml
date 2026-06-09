@@ -1,0 +1,114 @@
+[tool.poetry]
+name = "opencareer-demo"
+version = "0.1.0"
+description = "OpenCareer Demo - Multi-agent career assistant system"
+authors = ["OpenCareer Team <team@opencareer.example.com>"]
+readme = "README.md"
+license = "MIT"
+packages = [{include = "opencareer"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+
+# LangChain ecosystem
+langchain = "^0.1.0"
+langchain-community = "^0.0.10"
+
+# MCP (Model Context Protocol)
+mcp = "^1.0.0"
+
+# Vector database for memory
+chromadb = "^0.4.18"
+
+# Async task scheduling
+dramatiq = "^1.14.2"
+redis = "^5.0.0"
+
+# Web and async
+aiohttp = "^3.9.0"
+httpx = "^0.25.0"
+
+# Data validation
+pydantic = "^2.5.0"
+
+# Configuration
+python-dotenv = "^1.0.0"
+
+# Logging
+structlog = "^23.1.0"
+
+# Utils
+python-dateutil = "^2.8.2"
+
+[tool.poetry.group.dev.dependencies]
+# Testing
+pytest = "^7.4.0"
+pytest-asyncio = "^0.21.0"
+pytest-cov = "^4.1.0"
+pytest-mock = "^3.11.1"
+
+# Code quality
+black = "^23.11.0"
+isort = "^5.12.0"
+mypy = "^1.6.0"
+flake8 = "^6.1.0"
+pre-commit = "^3.5.0"
+
+# Documentation
+mkdocs = "^1.5.0"
+mkdocs-material = "^9.4.0"
+
+# Type stubs
+types-redis = "^4.6.0"
+types-python-dateutil = "^2.8.19"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+
+[tool.pytest.ini_options]
+testpaths = ["opencareer/tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["opencareer"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]

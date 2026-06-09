@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Briefcase, Calendar, Building2, Plus, Trash2, ChevronRight, Loader2, WifiOff } from "lucide-react"
+import { Calendar, Building2, Plus, Trash2, ChevronRight, Loader2, WifiOff } from "lucide-react"
 import { useSessionStore } from "../stores/sessionStore"
 import { useJobProgress, type JobCard } from "../hooks/useJobProgress"
 

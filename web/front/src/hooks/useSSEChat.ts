@@ -3,16 +3,26 @@ import { useChatStore } from '../stores/chatStore'
 
 export function useSSEChat(session_id: string | null) {
   const [isConnected, setIsConnected] = useState(false)
-  const { addMessage, setTyping, addFragment, finishStreaming, setStatus, setDemandAnalysis } = useChatStore()
+  const {
+    addMessage,
+    setTyping,
+    addFragment,
+    finishStreaming,
+    setStatus,
+    setDemandAnalysis,
+    setEmotionAnalysis,
+    setResumeUpdate,
+  } = useChatStore()
   const eventSourceRef = useRef<EventSource | null>(null)
 
   const sendMessage = useCallback(async (message: string) => {
     if (!session_id) return
+
     try {
-      // 先添加用户消息
+      // Show the outgoing message and typing bubble immediately.
       addMessage('user', message)
-      
-      // 开始请求
+      setTyping(true)
+
       const response = await fetch(`/api/chat/${session_id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -20,7 +30,10 @@ export function useSSEChat(session_id: string | null) {
       })
 
       const reader = response.body?.getReader()
-      if (!reader) return
+      if (!reader) {
+        setTyping(false)
+        return
+      }
 
       const decoder = new TextDecoder()
       let buffer = ''
@@ -36,47 +49,56 @@ export function useSSEChat(session_id: string | null) {
 
         for (const line of lines) {
           if (!line.trim()) continue
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6).trim())
-              switch (data.type) {
-                case 'typing_start':
-                  setTyping(true)
-                  break
-                case 'typing_end':
-                  setTyping(false)
-                  break
-                case 'fragment':
-                  addFragment(data.content, data.emotion)
-                  break
-                case 'done':
-                  finishStreaming()
-                  setIsConnected(false)
-                  break
-                case 'status':
-                  setStatus(data.phase, data.agent)
-                  break
-                case 'demand_analysis':
-                  setDemandAnalysis(data.data)
-                  break
-                case 'error':
-                  console.error('SSE error:', data.message)
-                  finishStreaming()
-                  setIsConnected(false)
-                  break
-              }
-            } catch (e) {
-              console.error('Failed to parse SSE data:', e)
+          if (!line.startsWith('data: ')) continue
+
+          try {
+            const data = JSON.parse(line.slice(6).trim())
+            switch (data.type) {
+              case 'typing_start':
+                setTyping(true)
+                break
+              case 'typing_end':
+                setTyping(false)
+                break
+              case 'fragment':
+                addFragment(data.content, data.emotion)
+                break
+              case 'done':
+                finishStreaming()
+                setTyping(false)
+                setIsConnected(false)
+                break
+              case 'status':
+                setStatus(data.phase, data.agent)
+                break
+              case 'demand_analysis':
+                setDemandAnalysis(data.data)
+                break
+              case 'emotion_analysis':
+                setEmotionAnalysis(data.data)
+                break
+              case 'resume_update':
+                setResumeUpdate(data.data)
+                break
+              case 'error':
+                console.error('SSE error:', data.message)
+                finishStreaming()
+                setTyping(false)
+                setIsConnected(false)
+                break
             }
+          } catch (e) {
+            console.error('Failed to parse SSE data:', e)
           }
         }
       }
     } catch (error) {
       console.error('SSE error:', error)
       finishStreaming()
+      setTyping(false)
       setIsConnected(false)
     }
-  }, [session_id, addMessage, setTyping, addFragment, finishStreaming, setStatus, setDemandAnalysis])
+  }, [session_id, addMessage, setTyping, addFragment, finishStreaming, setStatus, setDemandAnalysis, setEmotionAnalysis, setResumeUpdate])
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {

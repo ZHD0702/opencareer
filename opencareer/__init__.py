@@ -1,1 +1,1 @@
-# OpenCareer - AI Career Companion with LangChain + MCP
+# OpenCareer - Career companion with LangChain + MCP

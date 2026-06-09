@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useResume, type ResumeData } from "../hooks/useResume"
 import { useSessionStore } from "../stores/sessionStore"
-import { ChevronDown, ChevronRight, Pencil, Check, X } from "lucide-react"
+import { AlertCircle, Check, ChevronDown, ChevronRight, FileText, Pencil, Sparkles, X } from "lucide-react"
 
 type SectionKey = "basic" | "job" | "skills" | "concerns" | "summary"
 
@@ -12,6 +12,14 @@ const jobStageLabels: Record<string, string> = {
   waiting: "等待结果",
   negotiating: "薪资谈判",
   accepted: "已接受offer",
+}
+
+const resumeStageLabels: Record<string, string> = {
+  basic_info: "基础信息",
+  experience_discovery: "经历发现",
+  experience_deepening: "STAR 深挖",
+  soft_skill_assessment: "软技能评估",
+  resume_preview: "片段预览",
 }
 
 function formatStage(stage: string | null): string {
@@ -92,6 +100,7 @@ export function ResumeTab() {
   }
 
   const resumeData = data.data
+  const resumeState = resumeData.resume_state
 
   const toggleSection = (section: SectionKey) => {
     setExpanded((prev) => ({ ...prev, [section]: !prev[section] }))
@@ -159,15 +168,18 @@ export function ResumeTab() {
 
   if (!hasAnyData) {
     return (
-      <div className="text-sm text-sidebar-muted">
-        <p className="text-center mt-8">暂无简历数据</p>
-        <p className="text-center text-xs mt-2">对话中提及的经历将被自动提取</p>
+      <div className="text-sm">
+        <ResumeBuilderPanel state={resumeState} />
+        <p className="text-center mt-5 text-sidebar-muted">暂无简历数据</p>
+        <p className="text-center text-xs mt-2 text-sidebar-muted">对话中提及的经历会被自动提取成结构化片段</p>
       </div>
     )
   }
 
   return (
     <div className="text-sm">
+      <ResumeBuilderPanel state={resumeState} />
+
       {/* Last updated */}
       {data.last_updated && (
         <p className="text-[11px] text-sidebar-muted mb-3">
@@ -516,6 +528,124 @@ function FieldValue({ label, value }: { label: string; value: string | null | un
     <div className="flex justify-between items-baseline gap-2">
       <span className="text-[10px] text-sidebar-muted shrink-0">{label}</span>
       <span className="text-xs text-sidebar-foreground truncate text-right">{value}</span>
+    </div>
+  )
+}
+
+function ResumeBuilderPanel({ state }: { state: ResumeData["resume_state"] }) {
+  const completion = state?.completion ?? 0
+  const stage = state?.stage || "basic_info"
+  const latestPreview = state?.previews?.[0]
+  const questions = state?.unresolved_questions || []
+  const conflicts = state?.conflicts || []
+  const hardSkills = state?.skills?.hard || []
+  const softSkills = state?.skills?.soft || []
+  const industryMetrics = state?.industry_insights?.preferred_metrics || []
+  const llmInsights = state?.llm_insights
+
+  return (
+    <div className="mb-3 rounded-lg border border-sidebar-border bg-muted/35 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-sidebar-foreground">
+            <FileText className="h-3.5 w-3.5 text-primary" />
+            简历采集
+          </div>
+          <p className="mt-1 text-[11px] text-sidebar-muted">
+            {resumeStageLabels[stage] || stage}
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="text-sm font-semibold text-sidebar-foreground">{completion}%</div>
+          <div className="text-[10px] text-sidebar-muted">完成度</div>
+        </div>
+      </div>
+
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-background">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${Math.max(4, completion)}%` }}
+        />
+      </div>
+
+      {latestPreview && (
+        <div className="mt-3 rounded-md border border-sidebar-border bg-sidebar/70 p-2">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-sidebar-muted">
+            <Sparkles className="h-3.5 w-3.5" />
+            实时片段预览
+          </div>
+          <p className="text-xs leading-relaxed text-sidebar-foreground">
+            {latestPreview.content}
+          </p>
+          {latestPreview.needs_confirmation && (
+            <p className="mt-1 text-[11px] text-amber-600">
+              这条还缺量化结果，建议继续追问确认。
+            </p>
+          )}
+        </div>
+      )}
+
+      {(hardSkills.length > 0 || softSkills.length > 0) && (
+        <div className="mt-3 flex flex-wrap gap-1">
+          {[...hardSkills.slice(0, 5), ...softSkills.slice(0, 3)].map((skill) => (
+            <span
+              key={skill}
+              className="rounded-full bg-background px-2 py-0.5 text-[11px] text-sidebar-foreground"
+            >
+              {skill}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {industryMetrics.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1 text-[11px] font-medium text-sidebar-muted">行业优先指标</p>
+          <div className="flex flex-wrap gap-1">
+            {industryMetrics.slice(0, 6).map((metric) => (
+              <span
+                key={metric}
+                className="rounded-full border border-sidebar-border bg-sidebar px-2 py-0.5 text-[11px] text-sidebar-foreground"
+              >
+                {metric}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {llmInsights?.last_applied && (
+        <p className="mt-2 text-[11px] text-sidebar-muted">
+          LLM 已补强 STAR 与行业表达，置信度 {Math.round((llmInsights.confidence || 0) * 100)}%
+        </p>
+      )}
+
+      {questions.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1 text-[11px] font-medium text-sidebar-muted">下一步可以问</p>
+          <div className="space-y-1">
+            {questions.map((question) => (
+              <p key={question} className="rounded-md bg-background px-2 py-1.5 text-xs text-sidebar-foreground">
+                {question}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {conflicts.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {conflicts.map((conflict) => (
+            <div
+              key={`${conflict.type}-${conflict.message}`}
+              className="flex gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300"
+            >
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{conflict.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

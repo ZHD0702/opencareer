@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from "react"
+import { useRef, useEffect, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { User, Bot, Copy, RotateCcw, ThumbsUp, ThumbsDown, Check } from "lucide-react"
 import ReactMarkdown from "react-markdown"
@@ -67,16 +67,7 @@ function MessageBubble({
   const [copied, setCopied] = useState(false)
   const [showActions, setShowActions] = useState(false)
 
-  // Stable random max-width per bubble (40%–75%), seeded by message id
-  const bubbleMaxW = useMemo(() => {
-    let hash = 0
-    for (let i = 0; i < msg.id.length; i++) {
-      hash = ((hash << 5) - hash) + msg.id.charCodeAt(i)
-      hash |= 0
-    }
-    const pct = 40 + (Math.abs(hash) % 36) // 40% – 75%
-    return `${pct}%`
-  }, [msg.id])
+  const bubbleMaxW = "min(36rem, 64vw)"
 
   const handleCopy = useCallback(async () => {
     try {
@@ -120,8 +111,9 @@ function MessageBubble({
       <div className={cn("flex flex-col min-w-0", isUser ? "items-end" : "items-start")}>
         {/* Bubble */}
         <div
+          style={{ maxWidth: bubbleMaxW }}
           className={cn(
-            "px-5 py-3 text-base leading-relaxed rounded-2xl",
+            "w-fit whitespace-pre-wrap break-words px-5 py-3 text-base leading-relaxed rounded-2xl",
             isUser
               ? "bg-[var(--color-chat-bubble-user)] text-[var(--color-chat-bubble-user-text)] rounded-tr-sm shadow-lg"
               : "bg-[var(--color-chat-bubble-ai)] text-[var(--color-chat-bubble-ai-text)] rounded-tl-sm"

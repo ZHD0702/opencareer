@@ -4,15 +4,22 @@ import { useChatStore } from "../stores/chatStore"
 export interface EmotionTrendItem {
   emotions: string[]
   overall_state: string
+  current_mood: string
   support_intensity: string
   demand_type: string
   confidence: number
+  created_at?: string
   timestamp: string
 }
 
 export interface EmotionTrends {
   session_id: string
   current_mood: string | null
+  current_overall_state: string
+  current_emotions: string[]
+  confidence: number
+  support_intensity: string
+  suggested_action: string
   trend: "improving" | "declining" | "stable" | "insufficient_data"
   consecutive_negative: number
   negative_ratio: number

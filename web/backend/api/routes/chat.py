@@ -8,6 +8,9 @@ from api.exceptions import SessionNotFoundException, LLMServiceException
 from db.crud import save_message, get_messages, get_session
 from agent_factory import get_agent_factory
 from careers_config import config
+from services.chat_style import GUI_FRIENDLY_STYLE_PROMPT, apply_gui_style_to_career_agent
+from services.emotion_guard import EmotionGuard
+from services.resume_builder_service import ResumeBuilderService
 from utils.text_fragmenter import TextFragmenter
 
 router = APIRouter()
@@ -15,6 +18,27 @@ logger = logging.getLogger(__name__)
 
 # 全局 CareerAgent 实例管理（每个会话一个实例）
 _career_agents = {}
+
+
+def _build_resume_chat_hint(resume_update: dict) -> str:
+    changes = resume_update.get("changes") or []
+    preview = resume_update.get("latest_preview")
+    questions = resume_update.get("next_questions") or []
+    conflicts = resume_update.get("conflicts") or []
+
+    if conflicts:
+        return conflicts[0].get("message", "")
+
+    if not changes:
+        return ""
+
+    parts = []
+    if preview and preview.get("content"):
+        parts.append(f"我先把这段记成简历话术：{preview['content']}")
+    if questions:
+        parts.append(f"接下来我想确认一个点：{questions[0]}")
+
+    return "\n\n".join(parts)
 
 
 async def _get_career_agent(session_id: str):
@@ -27,6 +51,7 @@ async def _get_career_agent(session_id: str):
             use_mcp=config.USE_MCP,
             memory_file=f"career_memory_{session_id}.json"
         )
+        apply_gui_style_to_career_agent(agent)
         
         # 连接 MCP（如果启用）
         if hasattr(agent, "connect_mcp") and config.USE_MCP:
@@ -71,9 +96,15 @@ async def chat_stream(session_id: str, request: Request):
         
         logger.info(f"保存用户消息到数据库")
         save_message(session_id, "user", user_message.strip())
+
+        emotion_guard = EmotionGuard()
+        emotion_assessment = emotion_guard.assess(session_id, user_message.strip())
+        resume_update = await ResumeBuilderService().update_from_user_message_async(session_id, user_message.strip())
         
         # 获取 CareerAgent 实例（优先使用）
-        agent = await _get_career_agent(session_id)
+        agent = None
+        if not emotion_assessment.should_intervene:
+            agent = await _get_career_agent(session_id)
         
         logger.info("开始调用 Agent 生成回复")
         
@@ -84,9 +115,22 @@ async def chat_stream(session_id: str, request: Request):
             try:
                 # 先发送"对方正在输入..."信号
                 yield f"data: {json.dumps({'type': 'typing_start'})}\n\n"
+                emotion_event = emotion_assessment.to_event()
+                emotion_event["session_id"] = session_id
+                yield f"data: {json.dumps({'type': 'emotion_analysis', 'data': emotion_event}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'resume_update', 'data': resume_update}, ensure_ascii=False)}\n\n"
                 
                 # 检查是否是 CareerAgent
-                if hasattr(agent, "stream_chat"):
+                if emotion_assessment.should_intervene:
+                    logger.info(
+                        "Emotion intervention triggered for session %s: %s",
+                        session_id,
+                        emotion_assessment.reason,
+                    )
+                    full_ai_response.append(
+                        emotion_guard.build_support_response(emotion_assessment, user_message)
+                    )
+                elif hasattr(agent, "stream_chat"):
                     # CareerAgent - 使用完整的 LangChain 记忆系统
                     logger.info("使用 CareerAgent (带有 LangChain 记忆系统)")
                     
@@ -110,7 +154,7 @@ async def chat_stream(session_id: str, request: Request):
                     ]
                     
                     if hasattr(agent, "chat"):
-                        async for event in agent.chat(session_id, history):
+                        async for event in agent.chat(session_id, history, GUI_FRIENDLY_STYLE_PROMPT):
                             if event.startswith('data: '):
                                 try:
                                     data_str = event[6:].strip()
@@ -121,6 +165,10 @@ async def chat_stream(session_id: str, request: Request):
                                 except:
                                     pass
                             # 不发送事件，只收集内容
+
+                resume_hint = _build_resume_chat_hint(resume_update)
+                if resume_hint and not emotion_assessment.should_intervene:
+                    full_ai_response.append(f"\n\n{resume_hint}")
                 
                 # 发送"对方正在输入结束"信号
                 yield f"data: {json.dumps({'type': 'typing_end'})}\n\n"
@@ -132,7 +180,10 @@ async def chat_stream(session_id: str, request: Request):
                     
                     # 使用碎片化器处理文本（每次创建新实例确保加载最新代码）
                     fragmenter = TextFragmenter()
-                    fragments = fragmenter.fragment_with_particles(full_text)
+                    fragments = fragmenter.fragment_with_particles(
+                        full_text,
+                        user_message=user_message,
+                    )
                     
                     logger.info(f"碎片化完成: 生成 {len(fragments)} 个碎片")
                     
@@ -143,15 +194,20 @@ async def chat_stream(session_id: str, request: Request):
                     for i, fragment in enumerate(fragments):
                         # 发送碎片
                         yield f"data: {json.dumps({
-                            'type': 'fragment',
-                            'content': fragment.content,
-                            'emotion': fragment.emotion,
-                            'index': i
-                        })}\n\n"
+                                'type': 'fragment',
+                                'content': fragment.content,
+                                'emotion': fragment.emotion,
+                                'index': i,
+                                'kind': fragment.kind,
+                                'mode': fragment.mode,
+                                'delay_ms': fragment.delay_ms,
+                            })}\n\n"
                         
                         # 碎片之间添加延迟（最后一个碎片不需要延迟）
                         if i < len(fragments) - 1:
+                            yield f"data: {json.dumps({'type': 'typing_start'})}\n\n"
                             await asyncio.sleep(fragment.delay_ms / 1000.0)
+                            yield f"data: {json.dumps({'type': 'typing_end'})}\n\n"
                     
                     # 发送碎片化结束信号
                     yield f"data: {json.dumps({'type': 'fragmentation_end'})}\n\n"

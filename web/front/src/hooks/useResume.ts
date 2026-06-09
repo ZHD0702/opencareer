@@ -10,6 +10,59 @@ export interface ResumeData {
   skill_focus: string[]
   common_concerns: string[]
   background_summary: string | null
+  resume_state?: ResumeState | null
+}
+
+export interface ResumeState {
+  basics: Record<string, string | null>
+  target: Record<string, string | null>
+  education: Array<Record<string, unknown>>
+  experiences: ResumeExperience[]
+  projects: Array<Record<string, unknown>>
+  skills: {
+    hard: string[]
+    soft: string[]
+  }
+  preferences: Record<string, string | null>
+  previews: ResumePreview[]
+  industry_insights?: {
+    keywords: string[]
+    preferred_metrics: string[]
+    notes: string[]
+  }
+  llm_insights?: {
+    last_applied: boolean
+    confidence: number
+    reason: string | null
+  }
+  conflicts: ResumeConflict[]
+  unresolved_questions: string[]
+  stage: string
+  completion: number
+  last_update_summary: string | null
+}
+
+export interface ResumeExperience {
+  id: string
+  type: string
+  raw: string
+  star: Record<string, string | null>
+  metrics: Array<{ value: string; unit: string }>
+  bullets: string[]
+  created_at: string
+}
+
+export interface ResumePreview {
+  source: string
+  content: string
+  type: string
+  created_at: string
+  needs_confirmation: boolean
+}
+
+export interface ResumeConflict {
+  type: string
+  message: string
 }
 
 export interface ResumeResponse {
@@ -30,7 +83,7 @@ async function patchResume(
   sessionId: string,
   fields: Partial<ResumeData>,
 ): Promise<ResumeResponse> {
-  const res = await fetch(`http://localhost:8000/api/resume/${sessionId}`, {
+  const res = await fetch(`/api/resume/${sessionId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(fields),
@@ -44,9 +97,10 @@ async function patchResume(
 export function useResume(sessionId: string | null) {
   const queryClient = useQueryClient()
   const streamFinishCount = useChatStore((s) => s.streamFinishCount)
+  const resumeUpdateCount = useChatStore((s) => s.resumeUpdateCount)
 
   const query = useQuery({
-    queryKey: ["resume", sessionId, streamFinishCount],
+    queryKey: ["resume", sessionId, streamFinishCount, resumeUpdateCount],
     queryFn: () => fetchResume(sessionId!),
     enabled: !!sessionId,
     staleTime: 10_000,

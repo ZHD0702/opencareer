@@ -1,5 +1,5 @@
 """
-AI Career Companion — CLI entry point.
+OpenCareer — CLI entry point.
 
 Uses CareerAgent (LangChain + MCP) for career companion conversations.
 Automatically starts the MCP server as a subprocess, or use --no-mcp for offline mode.

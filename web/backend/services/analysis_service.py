@@ -7,6 +7,7 @@ from db.crud import (
     get_messages, save_emotion_record, get_emotion_records,
     get_skill_records, get_session
 )
+from services.resume_builder_service import ResumeBuilderService
 
 
 class AnalysisService:
@@ -32,6 +33,11 @@ class AnalysisService:
                 return {
                     "session_id": session_id,
                     "current_mood": "neutral",
+                    "current_overall_state": "neutral",
+                    "current_emotions": [],
+                    "confidence": 0.0,
+                    "support_intensity": "none",
+                    "suggested_action": "work",
                     "trend": "stable",
                     "consecutive_negative": 0,
                     "negative_ratio": 0.0,
@@ -40,31 +46,52 @@ class AnalysisService:
                     "history": []
                 }
             
-            recent_moods = [r.get("current_mood", "neutral") for r in records]
-            negative_count = sum(1 for r in records 
-                               if r.get("overall_state") in ["negative", "anxious"])
+            negative_states = {"negative", "crisis"}
+            negative_moods = {"negative", "anxious", "distressed", "crisis", "uneasy", "angry"}
+            elevated_support = {"medium", "high", "crisis"}
+            latest = records[0]
+            negative_count = sum(
+                1 for r in records
+                if r.get("overall_state") in negative_states
+                or r.get("support_intensity") in elevated_support
+            )
             
             ratio = negative_count / len(records) if records else 0
             consecutive_negative = 0
             
-            for mood in reversed(recent_moods):
-                if mood in ["negative", "anxious"]:
+            for record in records:
+                mood = record.get("current_mood", "neutral")
+                if mood in negative_moods:
                     consecutive_negative += 1
                 else:
                     break
             
-            needs_intervention = ratio > 0.5 or consecutive_negative >= 3
+            recent_high = sum(
+                1 for r in records[:5]
+                if r.get("support_intensity") in {"high", "crisis"}
+            )
+            needs_intervention = (
+                ratio > 0.5
+                or consecutive_negative >= 3
+                or recent_high >= 2
+                or any(r.get("support_intensity") == "crisis" for r in records[:3])
+            )
             reason = self._generate_intervention_reason(ratio, consecutive_negative)
             
             return {
                 "session_id": session_id,
-                "current_mood": records[0].get("current_mood", "neutral"),
+                "current_mood": latest.get("current_mood", "neutral"),
+                "current_overall_state": latest.get("overall_state", "neutral"),
+                "current_emotions": latest.get("emotions", []),
+                "confidence": latest.get("confidence") or 0.0,
+                "support_intensity": latest.get("support_intensity", "none"),
+                "suggested_action": latest.get("demand_type", "work"),
                 "trend": self._determine_trend(records),
                 "consecutive_negative": consecutive_negative,
                 "negative_ratio": round(ratio, 2),
                 "needs_intervention": needs_intervention,
                 "reason": reason,
-                "history": records[:10]
+                "history": [self._normalize_emotion_record(record) for record in records[:10]]
             }
         except Exception as e:
             print(f"[AnalysisService] get_emotion_trends error: {e}")
@@ -163,20 +190,18 @@ class AnalysisService:
             session = get_session(session_id)
             if not session:
                 return None
-            
+
+            resume_service = ResumeBuilderService()
+            state = resume_service.load_state(session_id)
+            data = resume_service.to_resume_response_data(state)
+
+            if session.get("target_role") and not data.get("target_role"):
+                data["target_role"] = session.get("target_role")
+
             return {
                 "session_id": session_id,
-                "data": {
-                    "grade_level": None,
-                    "major": None,
-                    "school": None,
-                    "target_role": session.get("target_role"),
-                    "job_search_stage": "exploring",
-                    "skill_focus": [],
-                    "common_concerns": [],
-                    "background_summary": None
-                },
-                "last_updated": datetime.utcnow().isoformat()
+                "data": data,
+                "last_updated": state.get("updated_at") or datetime.utcnow().isoformat()
             }
         except Exception as e:
             print(f"[AnalysisService] get_resume error: {e}")
@@ -196,7 +221,8 @@ class AnalysisService:
         if data.get("target_role"):
             from db.crud import update_session
             update_session(session_id, target_role=data.get("target_role"))
-        
+
+        ResumeBuilderService().apply_manual_update(session_id, data)
         return self.get_resume(session_id)
     
     def _determine_trend(self, records: List[Dict]) -> str:
@@ -207,17 +233,30 @@ class AnalysisService:
         recent = records[:3]
         older = records[3:6] if len(records) > 6 else records
         
-        recent_negative = sum(1 for r in recent 
-                            if r.get("overall_state") in ["negative", "anxious"])
-        older_negative = sum(1 for r in older 
-                           if r.get("overall_state") in ["negative", "anxious"])
+        negative_states = {"negative", "crisis"}
+        elevated_support = {"medium", "high", "crisis"}
+        recent_negative = sum(
+            1 for r in recent
+            if r.get("overall_state") in negative_states
+            or r.get("support_intensity") in elevated_support
+        )
+        older_negative = sum(
+            1 for r in older
+            if r.get("overall_state") in negative_states
+            or r.get("support_intensity") in elevated_support
+        )
         
         if recent_negative < older_negative:
             return "improving"
         elif recent_negative > older_negative:
-            return "worsening"
+            return "declining"
         else:
             return "stable"
+
+    def _normalize_emotion_record(self, record: Dict) -> Dict:
+        item = dict(record)
+        item["timestamp"] = item.get("created_at", "")
+        return item
     
     def _generate_intervention_reason(self, ratio: float, consecutive: int) -> str:
         """生成干预原因说明"""

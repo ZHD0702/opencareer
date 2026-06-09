@@ -27,7 +27,7 @@ logger = logging.getLogger("opencareer.mcp.server")
 
 mcp = FastMCP(
     name="OpenCareer MCP Server",
-    instructions="AI Career Companion tools",
+    instructions="OpenCareer tools",
     host="127.0.0.1",
     port=8001,
 )

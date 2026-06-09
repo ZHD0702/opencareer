@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 
 
@@ -21,6 +21,11 @@ class ChatRequest(BaseModel):
 class EmotionTrendsResponse(BaseModel):
     session_id: str
     current_mood: Optional[str]
+    current_overall_state: Optional[str] = "neutral"
+    current_emotions: List[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    support_intensity: str = "none"
+    suggested_action: str = "work"
     trend: str
     consecutive_negative: int
     negative_ratio: float
@@ -51,14 +56,15 @@ class SkillAssessmentResponse(BaseModel):
 
 
 class ResumeData(BaseModel):
-    grade_level: Optional[str]
-    major: Optional[str]
-    school: Optional[str]
-    target_role: Optional[str]
-    job_search_stage: Optional[str]
-    skill_focus: List[str]
-    common_concerns: List[str]
-    background_summary: Optional[str]
+    grade_level: Optional[str] = None
+    major: Optional[str] = None
+    school: Optional[str] = None
+    target_role: Optional[str] = None
+    job_search_stage: Optional[str] = None
+    skill_focus: List[str] = Field(default_factory=list)
+    common_concerns: List[str] = Field(default_factory=list)
+    background_summary: Optional[str] = None
+    resume_state: Optional[dict] = None
 
 
 class ResumeResponse(BaseModel):

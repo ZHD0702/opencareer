@@ -1,0 +1,438 @@
+# OpenCareer并发架构方案
+
+## 1. 项目背景与目标
+
+### 1.1 项目背景
+OpenCareer是一个多智能体架构的求职助手，采用LangChain + MCP + SKILLs技术栈。系统包含4个核心智能体：大脑（调度智能体）、工作代理、情感代理、日志代理。
+
+### 1.2 并发需求分析
+- **并发规模**：低并发（同时服务几个用户）
+- **响应要求**：可接受短暂延迟（几秒内响应）
+- **扩展需求**：适度扩展，预留未来扩展接口
+- **用户场景**：应届毕业生、职场转行者、在职跳槽者
+
+### 1.3 设计目标
+1. **响应性**：保证用户对话的流畅体验
+2. **可靠性**：多智能体协作稳定可靠
+3. **可扩展性**：支持未来功能扩展和并发提升
+4. **隔离性**：不同用户、不同代理之间互不干扰
+
+## 2. 整体架构设计
+
+### 2.1 架构图
+```
++----------------+     +----------------+     +----------------+
+|   用户输入     | --> |     大脑       | --> |   智能体调度   |
+| (多个会话)     |     | (中央调度器)   |     |   与协调       |
++----------------+     +----------------+     +----------------+
+                                          |
+                                          v
+        +----------------+----------------+----------------+
+        |                |                |                |
+        v                v                v                v
++----------------+ +----------------+ +----------------+ +----------------+
+|   工作代理     | |   情感代理     | |   日志代理     | |   其他代理     |
+| (技能提升)     | | (情感支持)     | | (信息提取)     | | (未来扩展)     |
++----------------+ +----------------+ +----------------+ +----------------+
+        |                |                |                |
+        +----------------+----------------+----------------+
+                                          |
+                                          v
+                                +----------------+
+                                |   结果聚合器   |
+                                |   与回复生成   |
+                                +----------------+
+```
+
+### 2.2 核心原则
+1. **大脑中心调度**：大脑作为中央调度器，负责路由所有用户请求
+2. **异步非阻塞**：采用异步编程模型，避免阻塞等待
+3. **会话隔离**：每个用户会话独立处理，数据不交叉
+4. **资源池化**：智能体资源按需分配，避免浪费
+
+## 3. 并发实现方案
+
+### 3.1 异步架构实现
+
+#### 3.1.1 大脑调度逻辑
+```python
+# 伪代码：大脑异步调度实现
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+class BrainScheduler:
+    def __init__(self):
+        self.executor = ThreadPoolExecutor(max_workers=10)  # 线程池
+        self.agent_registry = {}  # 代理注册表
+        self.session_manager = SessionManager()  # 会话管理器
+
+    async def process_user_input(self, session_id: str, user_input: str) -> str:
+        """
+        异步处理用户输入
+        """
+        # 1. 分析需求类型
+        demand_type = await self.analyze_demand_type(user_input)
+
+        # 2. 创建异步任务列表
+        tasks = []
+
+        # 根据需求类型调用相应代理
+        if demand_type == "job_related":
+            tasks.append(self.call_work_agent(session_id, user_input))
+        elif demand_type == "emotional":
+            tasks.append(self.call_emotion_agent(session_id, user_input))
+        elif demand_type == "mixed":  # 复合需求
+            tasks.append(self.call_work_agent(session_id, user_input))
+            tasks.append(self.call_emotion_agent(session_id, user_input))
+
+        # 3. 后台日志处理（不阻塞主流程）
+        asyncio.create_task(self.call_log_agent(session_id, user_input))
+
+        # 4. 并行执行任务
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # 5. 整合结果
+            response = self.integrate_results(results)
+            return response
+        else:
+            return await self.default_response(user_input)
+
+    async def analyze_demand_type(self, user_input: str) -> str:
+        """使用小模型分析需求类型"""
+        # 调用DeepSeek小模型分析
+        # 返回: "job_related", "emotional", "mixed", "unknown"
+        pass
+```
+
+#### 3.1.2 智能体调用机制
+```python
+# 伪代码：智能体异步调用
+class AgentInvoker:
+    def __init__(self):
+        self.agent_pool = AgentPool()  # 代理池
+        self.message_queue = asyncio.Queue()  # 消息队列
+
+    async def call_agent(self, agent_type: str, session_id: str, input_data: dict) -> dict:
+        """
+        异步调用智能体
+        """
+        # 1. 从代理池获取代理实例
+        agent = await self.agent_pool.acquire(agent_type)
+
+        try:
+            # 2. 异步执行代理任务
+            result = await asyncio.to_thread(
+                agent.process,
+                session_id=session_id,
+                input_data=input_data
+            )
+            return result
+        finally:
+            # 3. 释放代理回池
+            await self.agent_pool.release(agent_type, agent)
+```
+
+### 3.2 会话管理与隔离
+
+#### 3.2.1 会话管理器
+```python
+class SessionManager:
+    def __init__(self):
+        self.sessions = {}  # session_id -> SessionData
+        self.lock = asyncio.Lock()
+
+    async def create_session(self, user_id: str) -> str:
+        """创建新会话"""
+        session_id = self.generate_session_id()
+        async with self.lock:
+            self.sessions[session_id] = {
+                "user_id": user_id,
+                "created_at": time.time(),
+                "context": {},
+                "agent_states": {},
+                "is_active": True
+            }
+        return session_id
+
+    async def get_session_data(self, session_id: str) -> dict:
+        """获取会话数据（线程安全）"""
+        async with self.lock:
+            return self.sessions.get(session_id, {}).copy()
+
+    async def update_session_context(self, session_id: str, key: str, value: any):
+        """更新会话上下文"""
+        async with self.lock:
+            if session_id in self.sessions:
+                self.sessions[session_id]["context"][key] = value
+```
+
+#### 3.2.2 数据隔离策略
+1. **会话级隔离**：每个会话有独立的上下文和状态
+2. **代理级隔离**：每个代理实例有独立的工作空间
+3. **文件级隔离**：不同用户的数据存储在独立文件/目录中
+4. **内存隔离**：使用独立的数据结构存储会话状态
+
+### 3.3 资源管理与池化
+
+#### 3.3.1 代理池实现
+```python
+class AgentPool:
+    def __init__(self):
+        self.pools = {
+            "work_agent": asyncio.Queue(),
+            "emotion_agent": asyncio.Queue(),
+            "log_agent": asyncio.Queue()
+        }
+        self.max_pool_size = 3  # 每个代理类型最大实例数
+        self.active_count = defaultdict(int)
+
+    async def acquire(self, agent_type: str) -> Agent:
+        """
+        从池中获取代理实例
+        """
+        # 如果池中有可用实例，直接获取
+        if not self.pools[agent_type].empty():
+            return await self.pools[agent_type].get()
+
+        # 如果未达到最大实例数，创建新实例
+        if self.active_count[agent_type] < self.max_pool_size:
+            agent = await self.create_agent(agent_type)
+            self.active_count[agent_type] += 1
+            return agent
+
+        # 等待可用实例
+        return await self.pools[agent_type].get()
+
+    async def release(self, agent_type: str, agent: Agent):
+        """
+        释放代理回池
+        """
+        await self.pools[agent_type].put(agent)
+```
+
+#### 3.3.2 线程/进程池配置
+```python
+# 配置示例
+THREAD_POOL_CONFIG = {
+    "max_workers": 10,           # 最大工作线程数
+    "thread_name_prefix": "agent_worker",
+    "initializer": init_worker,  # 线程初始化函数
+    "initargs": ()              # 初始化参数
+}
+
+PROCESS_POOL_CONFIG = {
+    "max_workers": 4,           # 最大进程数（用于CPU密集型任务）
+    "maxtasksperchild": 100,    # 每个进程最大任务数
+    "initializer": init_process,
+    "initargs": ()
+}
+```
+
+## 4. 性能保障机制
+
+### 4.1 负载监控与限流
+```python
+class LoadBalancer:
+    def __init__(self):
+        self.request_count = 0
+        self.request_timestamps = []
+        self.max_rps = 20  # 最大每秒请求数
+
+    async def check_rate_limit(self) -> bool:
+        """检查速率限制"""
+        current_time = time.time()
+        # 清理1秒前的记录
+        self.request_timestamps = [
+            ts for ts in self.request_timestamps
+            if current_time - ts < 1.0
+        ]
+
+        # 检查是否超过限制
+        if len(self.request_timestamps) >= self.max_rps:
+            return False
+
+        self.request_timestamps.append(current_time)
+        return True
+```
+
+### 4.2 超时与重试机制
+```python
+class TimeoutRetryHandler:
+    def __init__(self):
+        self.default_timeout = 30.0  # 默认超时时间（秒）
+        self.max_retries = 2         # 最大重试次数
+
+    async def execute_with_timeout(self, coro, timeout=None):
+        """带超时的协程执行"""
+        timeout = timeout or self.default_timeout
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await asyncio.wait_for(coro, timeout=timeout)
+            except asyncio.TimeoutError:
+                if attempt == self.max_retries:
+                    raise
+                logging.warning(f"Timeout, retrying... (attempt {attempt + 1})")
+```
+
+### 4.3 内存与资源监控
+```python
+class ResourceMonitor:
+    def __init__(self):
+        self.memory_threshold = 0.8  # 内存使用阈值（80%）
+        self.cpu_threshold = 0.7     # CPU使用阈值（70%）
+
+    async def check_resources(self) -> dict:
+        """检查系统资源"""
+        import psutil
+
+        memory_usage = psutil.virtual_memory().percent / 100
+        cpu_usage = psutil.cpu_percent(interval=1) / 100
+
+        return {
+            "memory_usage": memory_usage,
+            "cpu_usage": cpu_usage,
+            "memory_ok": memory_usage < self.memory_threshold,
+            "cpu_ok": cpu_usage < self.cpu_threshold
+        }
+```
+
+## 5. 扩展策略
+
+### 5.1 水平扩展（多大脑实例）
+```python
+# 负载均衡配置
+LOAD_BALANCER_CONFIG = {
+    "strategy": "round_robin",  # 轮询策略
+    "brain_instances": [
+        {"host": "localhost", "port": 8001, "weight": 1},
+        {"host": "localhost", "port": 8002, "weight": 1},
+        {"host": "localhost", "port": 8003, "weight": 1}
+    ]
+}
+```
+
+### 5.2 垂直扩展（代理优化）
+1. **模型优化**：使用更高效的模型推理
+2. **缓存策略**：实现智能体结果缓存
+3. **批处理**：对相似请求进行批处理
+
+### 5.3 事件驱动架构升级
+```python
+# 事件驱动架构示例
+class EventBus:
+    def __init__(self):
+        self.subscribers = defaultdict(list)
+
+    def subscribe(self, event_type: str, callback):
+        """订阅事件"""
+        self.subscribers[event_type].append(callback)
+
+    async def publish(self, event_type: str, data: dict):
+        """发布事件"""
+        for callback in self.subscribers.get(event_type, []):
+            asyncio.create_task(callback(data))
+```
+
+## 6. 部署方案
+
+### 6.1 开发环境部署
+```
+单进程部署：
+python main.py --workers=1 --port=8000
+```
+
+### 6.2 生产环境部署
+```
+多进程部署：
+gunicorn main:app --workers=4 --worker-class=uvicorn.workers.UvicornWorker --bind=0.0.0.0:8000
+```
+
+### 6.3 容器化部署（Docker）
+```dockerfile
+FROM python:3.9-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+
+CMD ["gunicorn", "main:app", "--workers=4", "--worker-class=uvicorn.workers.UvicornWorker", "--bind=0.0.0.0:8000"]
+```
+
+## 7. 测试方案
+
+### 7.1 单元测试
+- 测试单个智能体的异步处理
+- 测试会话管理器的线程安全性
+- 测试资源池的正确性
+
+### 7.2 并发测试
+```python
+# 并发测试示例
+async def test_concurrent_users(num_users: int = 5):
+    """模拟多用户并发访问"""
+    tasks = []
+    for i in range(num_users):
+        task = asyncio.create_task(
+            simulate_user_session(f"user_{i}")
+        )
+        tasks.append(task)
+
+    results = await asyncio.gather(*tasks)
+    return results
+```
+
+### 7.3 压力测试
+- **目标**：验证系统在负载下的表现
+- **工具**：使用locust或JMeter进行压力测试
+- **指标**：响应时间、错误率、资源使用率
+
+## 8. 性能指标与监控
+
+### 8.1 关键性能指标（KPI）
+1. **响应时间**：P50 < 2s, P95 < 5s
+2. **错误率**：< 1%
+3. **并发用户数**：支持5-10个并发用户
+4. **资源使用率**：CPU < 70%, 内存 < 80%
+
+### 8.2 监控告警
+- **监控工具**：Prometheus + Grafana
+- **告警规则**：响应时间超时、错误率升高、资源不足
+- **日志收集**：结构化日志，便于问题排查
+
+## 9. 故障恢复与容错
+
+### 9.1 故障检测
+```python
+class HealthChecker:
+    async def check_agent_health(self, agent_type: str) -> bool:
+        """检查代理健康状态"""
+        try:
+            agent = self.agent_pool.get_agent(agent_type)
+            response = await agent.health_check(timeout=5)
+            return response["status"] == "healthy"
+        except Exception as e:
+            logging.error(f"Agent {agent_type} health check failed: {e}")
+            return False
+```
+
+### 9.2 容错策略
+1. **代理故障**：自动重启故障代理
+2. **大脑故障**：备用大脑实例接管
+3. **数据不一致**：会话数据备份与恢复
+4. **网络故障**：重试机制与降级策略
+
+## 10. 总结
+
+本并发架构方案基于OpenCareer的实际需求设计，具有以下特点：
+
+1. **实用性强**：针对低并发场景优化，满足实际需求
+2. **扩展性好**：预留水平扩展和垂直扩展接口
+3. **可靠性高**：完善的故障恢复和容错机制
+4. **易维护**：清晰的架构设计和模块化实现
+
+该方案可以在保证性能的前提下，支持多个智能体同时工作且互不干扰，为OpenCareer项目提供稳定可靠的并发处理能力。
+
+相关技术决策与前期规划：
+有关具体技术决策、前期不实现功能、开发阶段划分等详细信息，请参阅《技术决策与前期规划.txt》文档。

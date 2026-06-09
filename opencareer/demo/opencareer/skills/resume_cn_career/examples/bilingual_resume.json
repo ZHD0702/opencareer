@@ -1,0 +1,47 @@
+{
+  "format": "bilingual",
+  "contact": {
+    "name": "张三 / Zhang San",
+    "title": "高级软件工程师 / Senior Software Engineer",
+    "location": "Shanghai",
+    "phone": "13800000000",
+    "email": "zhangsan@example.com",
+    "links": [
+      "GitHub: github.com/zhangsan"
+    ]
+  },
+  "zh": {
+    "summary": "8 年后端研发经验，主导过高并发链路优化与稳定性治理，具备跨团队协作与技术推动能力。",
+    "sections": [
+      {
+        "title": "工作经历",
+        "items": [
+          {
+            "heading": "某科技公司 | 高级软件工程师 | 2021.06 - 至今",
+            "bullets": [
+              "主导交易链路优化，P95 延迟下降 45%。",
+              "建立异常预警机制，故障恢复时长缩短 40%。"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "en": {
+    "summary": "Senior backend engineer with 8 years of experience in high-concurrency services, system reliability, and performance optimization.",
+    "sections": [
+      {
+        "title": "Professional Experience",
+        "items": [
+          {
+            "heading": "Tech Company | Senior Software Engineer | 2021.06 - Present",
+            "bullets": [
+              "Led transaction path optimization and reduced P95 latency by 45%.",
+              "Built alerting workflows and shortened incident recovery time by 40%."
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -28,7 +28,7 @@ const tabContent: Record<SidebarTab, React.ComponentType> = {
 export function Sidebar() {
   const { sidebarTab, setSidebarTab, sidebarCollapsed } = useSessionStore()
   const [hoveredTab, setHoveredTab] = useState<SidebarTab | null>(null)
-  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleTabHover = (tabId: SidebarTab) => {
     if (!sidebarCollapsed) return

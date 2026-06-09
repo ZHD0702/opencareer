@@ -62,6 +62,15 @@ def init_sync_db():
             FOREIGN KEY (session_id) REFERENCES sessions(id)
         )
     """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS resume_states (
+            session_id TEXT PRIMARY KEY,
+            state_json TEXT NOT NULL,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        )
+    """)
     
     conn.commit()
     conn.close()
@@ -249,5 +258,50 @@ def get_skill_records(session_id: str) -> List[Dict]:
         }
         for row in rows
     ]
+
+def get_resume_state(session_id: str) -> Optional[Dict]:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT state_json, updated_at
+        FROM resume_states
+        WHERE session_id = ?
+    """, (session_id,))
+
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    try:
+        state = json.loads(row[0])
+    except json.JSONDecodeError:
+        state = {}
+
+    state["updated_at"] = row[1]
+    return state
+
+def save_resume_state(session_id: str, state: Dict):
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    now = datetime.utcnow().isoformat()
+    payload = dict(state)
+    payload.pop("updated_at", None)
+
+    cursor.execute("""
+        INSERT INTO resume_states (session_id, state_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+            state_json = excluded.state_json,
+            updated_at = excluded.updated_at
+    """, (session_id, json.dumps(payload, ensure_ascii=False), now))
+
+    conn.commit()
+    conn.close()
 
 init_sync_db()

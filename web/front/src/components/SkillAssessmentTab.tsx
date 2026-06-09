@@ -2,7 +2,7 @@ import { useState } from "react"
 import { motion } from "framer-motion"
 import { Sparkles, TrendingUp, AlertCircle, Target, Loader2, WifiOff, Edit3, Check, X } from "lucide-react"
 import { useSessionStore } from "../stores/sessionStore"
-import { useSkillAssessment, type SkillItem } from "../hooks/useSkillAssessment"
+import { useSkillAssessment } from "../hooks/useSkillAssessment"
 
 const categoryConfig: Record<string, string> = {
   "编程语言": "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400",

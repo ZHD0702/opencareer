@@ -2,7 +2,7 @@ import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Clock, MessageSquare, Trash2, Search, ChevronRight, Loader2, WifiOff } from "lucide-react"
 import { useSessionStore } from "../stores/sessionStore"
-import { useSessionHistory, type SessionInfo } from "../hooks/useSessionHistory"
+import { useSessionHistory } from "../hooks/useSessionHistory"
 
 function formatDate(iso: string): string {
   const d = new Date(iso)

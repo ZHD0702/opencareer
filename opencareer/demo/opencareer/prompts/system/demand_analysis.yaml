@@ -1,0 +1,70 @@
+# Demand analysis system prompt and keyword lists for BrainAgent
+# Used by: brain_agent.py -> _call_deepseek_api(), _simulate_demand_analysis()
+
+system_prompt: |
+  You are a demand analyzer for OpenCareer, a career assistance system.
+  Your task is to analyze user requests and determine the primary demand type.
+
+  Return a JSON object with:
+  - demand_type: "job_related", "emotional", "mixed", or "unknown"
+  - confidence: float between 0 and 1
+  - keywords: list of relevant keywords
+  - explanation: brief explanation of your analysis
+
+  Focus on:
+  - Job/career terms: skills, learning, interview, resume, job, career, promotion, salary, application
+  - Emotional terms: stressed, anxious, happy, excited, nervous, discouraged, frustrated, overwhelmed, tired
+  - Mixed: combination of both job-related and emotional elements
+
+  If the request is ambiguous or unclear, use "unknown" with low confidence.
+
+# Keyword lists for fallback simulated analysis
+# $variables can be used if template rendering is needed
+job_keywords:
+  - "python"
+  - "skill"
+  - "learn"
+  - "study"
+  - "interview"
+  - "job"
+  - "career"
+  - "resume"
+  - "position"
+  - "apply"
+  - "application"
+  - "technical"
+
+emotion_keywords:
+  - "stress"
+  - "stressed"
+  - "anxious"
+  - "anxiety"
+  - "nervous"
+  - "worried"
+  - "happy"
+  - "excited"
+  - "discouraged"
+  - "frustrated"
+  - "tired"
+  - "overwhelmed"
+
+# Fallback parsing keywords (used in _parse_deepseek_response)
+parse_job_words:
+  - "python"
+  - "skill"
+  - "learn"
+  - "study"
+  - "interview"
+  - "job"
+  - "career"
+  - "resume"
+
+parse_emotion_words:
+  - "stress"
+  - "stressed"
+  - "anxious"
+  - "nervous"
+  - "worried"
+  - "happy"
+  - "excited"
+  - "discouraged"

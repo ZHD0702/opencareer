@@ -1,0 +1,127 @@
+# Career advice configuration for WorkAgent
+# Used by: work_agent.py
+# Note: All pre-made response text has been removed.
+# Response generation is handled by LLMClient.
+
+# ---------------------------------------------------------------------------
+# Emotional distress keywords for detection
+# ---------------------------------------------------------------------------
+emotional_distress_keywords:
+  - "沮丧"
+  - "焦虑"
+  - "压力"
+  - "难过"
+  - "不开心"
+  - "疲惫"
+  - "累"
+  - "失望"
+  - "迷茫"
+  - "无助"
+  - "没信心"
+  - "害怕"
+  - "紧张"
+  - "崩溃"
+  - "放弃"
+  - "烦"
+  - "痛苦"
+  - "受不了"
+  - "坚持不下去"
+
+# ---------------------------------------------------------------------------
+# Topic detection keywords
+# ---------------------------------------------------------------------------
+topic_detection_keywords:
+  resume:
+    - "resume"
+    - "cv"
+    - "curriculum"
+    - "简历"
+    - "履历"
+  networking:
+    - "network"
+    - "connection"
+    - "linkedin"
+    - "人脉"
+    - "社交"
+    - "领英"
+  salary:
+    - "salary"
+    - "compensation"
+    - "pay"
+    - "薪资"
+    - "薪水"
+    - "待遇"
+    - "工资"
+  job_search:
+    - "job search"
+    - "find job"
+    - "hunting"
+    - "找工作"
+    - "求职"
+    - "找工"
+    - "跳槽"
+  interview_tips:
+    - "interview tip"
+    - "interview advice"
+    - "how to interview"
+    - "面试技巧"
+    - "面试建议"
+    - "怎么面试"
+  career_planning:
+    - "职业规划"
+    - "发展方向"
+    - "转行"
+    - "职业选择"
+
+# ---------------------------------------------------------------------------
+# Skill trigger keywords (for available_skills routing)
+# ---------------------------------------------------------------------------
+skill_triggers:
+  learning_plan:
+    - "learn"
+    - "skill"
+    - "improve"
+    - "study"
+    - "training"
+    - "plan"
+    - "学习"
+    - "技能"
+    - "提升"
+    - "计划"
+    - "培训"
+    - "课程"
+  mock_interview:
+    - "interview"
+    - "practice"
+    - "mock"
+    - "question"
+    - "prepare"
+    - "面试"
+    - "练习"
+    - "准备"
+    - "模拟"
+    - "面试题"
+    - "题库"
+  resume_cn:
+    - "简历"
+    - "优化简历"
+    - "修改简历"
+    - "润色"
+    - "resume"
+    - "cv"
+    - "rewrite"
+    - "简历模板"
+    - "简历诊断"
+    - "简历评分"
+    - "ATS"
+    - "简历优化"
+    - "简历修改"
+
+# ---------------------------------------------------------------------------
+# Target role extraction prefixes (Chinese)
+# ---------------------------------------------------------------------------
+target_role_prefixes:
+  - "想做"
+  - "目标"
+  - "应聘"
+  - "投递"
