@@ -60,6 +60,8 @@ interface ChatState {
   setDemandAnalysis: (data: Record<string, unknown> | null) => void
   setEmotionAnalysis: (data: EmotionSnapshot | null) => void
   setResumeUpdate: (data: ResumeSnapshot | null) => void
+  hydrateMessages: (messages: Array<Pick<Message, "id" | "role" | "content" | "timestamp">>) => void
+  resetConversation: () => void
   setFeedback: (id: string, type: FeedbackType | null) => void
   removeLastMessage: () => void
 }
@@ -192,6 +194,39 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setResumeUpdate: (data) => {
     set((s) => ({ resumeUpdate: data, resumeUpdateCount: s.resumeUpdateCount + 1 }))
+  },
+
+  hydrateMessages: (messages) => {
+    const maxNumericId = messages.reduce((max, message) => {
+      const numeric = Number(message.id)
+      return Number.isFinite(numeric) ? Math.max(max, numeric) : max
+    }, 0)
+    nextId = Math.max(nextId, maxNumericId + 1)
+
+    set({
+      messages: messages.map((message) => ({
+        ...message,
+        isStreaming: false,
+      })),
+      isStreaming: false,
+      isTyping: false,
+      currentPhase: null,
+      currentAgent: null,
+    })
+  },
+
+  resetConversation: () => {
+    set({
+      messages: [],
+      isStreaming: false,
+      isTyping: false,
+      currentPhase: null,
+      currentAgent: null,
+      demandAnalysis: null,
+      emotionAnalysis: null,
+      resumeUpdate: null,
+      messageFeedback: {},
+    })
   },
 
   setFeedback: (id, type) => {

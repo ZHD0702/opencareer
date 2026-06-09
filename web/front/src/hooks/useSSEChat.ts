@@ -15,15 +15,16 @@ export function useSSEChat(session_id: string | null) {
   } = useChatStore()
   const eventSourceRef = useRef<EventSource | null>(null)
 
-  const sendMessage = useCallback(async (message: string) => {
-    if (!session_id) return
+  const sendMessage = useCallback(async (message: string, sessionIdOverride?: string) => {
+    const activeSessionId = sessionIdOverride || session_id
+    if (!activeSessionId) return
 
     try {
       // Show the outgoing message and typing bubble immediately.
       addMessage('user', message)
       setTyping(true)
 
-      const response = await fetch(`/api/chat/${session_id}`, {
+      const response = await fetch(`/api/chat/${activeSessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),

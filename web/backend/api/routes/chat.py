@@ -5,12 +5,13 @@ import logging
 import asyncio
 
 from api.exceptions import SessionNotFoundException, LLMServiceException
-from db.crud import save_message, get_messages, get_session
+from db.crud import save_message, get_messages, get_session, update_session
 from agent_factory import get_agent_factory
 from careers_config import config
 from services.chat_style import GUI_FRIENDLY_STYLE_PROMPT, apply_gui_style_to_career_agent
 from services.emotion_guard import EmotionGuard
 from services.resume_builder_service import ResumeBuilderService
+from services.session_title_service import generate_session_title
 from utils.text_fragmenter import TextFragmenter
 
 router = APIRouter()
@@ -49,7 +50,7 @@ async def _get_career_agent(session_id: str):
             "career",
             mcp_url=config.MCP_URL,
             use_mcp=config.USE_MCP,
-            memory_file=f"career_memory_{session_id}.json"
+            memory_file=str(config.get_session_memory_path(session_id))
         )
         apply_gui_style_to_career_agent(agent)
         
@@ -96,6 +97,10 @@ async def chat_stream(session_id: str, request: Request):
         
         logger.info(f"保存用户消息到数据库")
         save_message(session_id, "user", user_message.strip())
+        recent_messages = get_messages(session_id, limit=20)
+        user_message_count = len([msg for msg in recent_messages if msg["role"] == "user"])
+        if user_message_count == 1 and not session.get("title"):
+            update_session(session_id, title=generate_session_title(user_message.strip()))
 
         emotion_guard = EmotionGuard()
         emotion_assessment = emotion_guard.assess(session_id, user_message.strip())

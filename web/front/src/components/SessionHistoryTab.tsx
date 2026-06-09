@@ -48,7 +48,7 @@ export function SessionHistoryTab() {
         }
         // If we deleted the active session, clear it
         if (id === activeSessionId) {
-          setSessionId("")
+          setSessionId(null)
         }
       },
     })

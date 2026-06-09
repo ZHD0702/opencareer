@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useChatStore } from "../stores/chatStore"
 
 export interface SessionInfo {
   session_id: string
@@ -30,9 +31,11 @@ async function deleteSession(sessionId: string): Promise<{ deleted: boolean }> {
 
 export function useSessionHistory() {
   const queryClient = useQueryClient()
+  const streamFinishCount = useChatStore((s) => s.streamFinishCount)
+  const resumeUpdateCount = useChatStore((s) => s.resumeUpdateCount)
 
   const query = useQuery({
-    queryKey: ["sessions"],
+    queryKey: ["sessions", streamFinishCount, resumeUpdateCount],
     queryFn: fetchSessions,
     staleTime: 10_000,
     refetchOnWindowFocus: false,

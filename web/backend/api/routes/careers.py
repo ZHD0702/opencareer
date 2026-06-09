@@ -92,7 +92,7 @@ async def _get_career_agent(session_id: str):
             "career",
             mcp_url=config.MCP_URL,
             use_mcp=config.USE_MCP,
-            memory_file=f"career_memory_{session_id}.json"
+            memory_file=str(config.get_session_memory_path(session_id))
         )
         
         # 连接 MCP（如果启用）

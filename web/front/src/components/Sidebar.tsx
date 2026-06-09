@@ -1,7 +1,8 @@
 import { useState, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Heart, FileText, BarChart3, Sparkles, Clock } from "lucide-react"
+import { Heart, FileText, BarChart3, Sparkles, Clock, SquarePen } from "lucide-react"
 import { useSessionStore, type SidebarTab } from "../stores/sessionStore"
+import { useChatStore } from "../stores/chatStore"
 import { cn } from "../lib/utils"
 import { EmotionTab } from "./EmotionTab"
 import { ResumeTab } from "./ResumeTab"
@@ -10,11 +11,11 @@ import { SkillAssessmentTab } from "./SkillAssessmentTab"
 import { SessionHistoryTab } from "./SessionHistoryTab"
 
 const tabs: { id: SidebarTab; label: string; icon: typeof Heart }[] = [
+  { id: "session-history", label: "历史会话", icon: Clock },
   { id: "emotion", label: "情绪", icon: Heart },
   { id: "resume", label: "简历", icon: FileText },
   { id: "job-progress", label: "求职进度", icon: BarChart3 },
   { id: "skill-assessment", label: "技能评估", icon: Sparkles },
-  { id: "session-history", label: "历史会话", icon: Clock },
 ]
 
 const tabContent: Record<SidebarTab, React.ComponentType> = {
@@ -26,7 +27,8 @@ const tabContent: Record<SidebarTab, React.ComponentType> = {
 }
 
 export function Sidebar() {
-  const { sidebarTab, setSidebarTab, sidebarCollapsed } = useSessionStore()
+  const { sidebarTab, setSidebarTab, sidebarCollapsed, setSessionId } = useSessionStore()
+  const resetConversation = useChatStore((s) => s.resetConversation)
   const [hoveredTab, setHoveredTab] = useState<SidebarTab | null>(null)
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -42,6 +44,13 @@ export function Sidebar() {
   }
 
   const ActiveContent = tabContent[sidebarTab]
+
+  const handleCreateNewSession = () => {
+    setSessionId(null)
+    resetConversation()
+    setSidebarTab("session-history")
+    setHoveredTab(null)
+  }
 
   return (
     <motion.aside
@@ -105,6 +114,36 @@ export function Sidebar() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <div className={cn(
+        "border-t border-sidebar-border bg-sidebar/95 p-3",
+        sidebarCollapsed && "px-2"
+      )}>
+        <motion.button
+          type="button"
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={handleCreateNewSession}
+          title="创建新会话"
+          className={cn(
+            "group relative flex w-full items-center justify-center gap-2 rounded-lg border border-sidebar-border",
+            "bg-background/70 text-sidebar-foreground shadow-sm transition-colors",
+            "hover:border-primary/40 hover:bg-primary/10 hover:text-primary",
+            "focus:outline-none focus:ring-2 focus:ring-primary/25",
+            sidebarCollapsed ? "h-10 px-0" : "px-3 py-2.5"
+          )}
+        >
+          <SquarePen className="h-4 w-4 shrink-0" />
+          {!sidebarCollapsed && (
+            <span className="text-sm font-medium whitespace-nowrap">创建新会话</span>
+          )}
+          {sidebarCollapsed && (
+            <span className="pointer-events-none absolute left-[48px] z-50 rounded-md border border-sidebar-border bg-sidebar px-2 py-1 text-xs text-sidebar-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+              创建新会话
+            </span>
+          )}
+        </motion.button>
+      </div>
 
       {/* Hover popup (collapsed mode) */}
       <AnimatePresence>

@@ -15,12 +15,18 @@ def init_sync_db():
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
+            title TEXT,
             target_role TEXT,
             current_phase TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    cursor.execute("PRAGMA table_info(sessions)")
+    session_columns = {row[1] for row in cursor.fetchall()}
+    if "title" not in session_columns:
+        cursor.execute("ALTER TABLE sessions ADD COLUMN title TEXT")
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS messages (
@@ -83,9 +89,9 @@ def create_session(session_id: str, user_id: str, target_role: Optional[str] = N
     now = datetime.utcnow().isoformat()
     
     cursor.execute("""
-        INSERT INTO sessions (id, user_id, target_role, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-    """, (session_id, user_id, target_role, now, now))
+        INSERT INTO sessions (id, user_id, title, target_role, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (session_id, user_id, None, target_role, now, now))
     
     conn.commit()
     conn.close()
@@ -93,6 +99,7 @@ def create_session(session_id: str, user_id: str, target_role: Optional[str] = N
     return {
         "session_id": session_id,
         "user_id": user_id,
+        "title": None,
         "target_role": target_role,
         "created_at": now,
         "updated_at": now
@@ -103,7 +110,7 @@ def get_session(session_id: str) -> Optional[Dict]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id, user_id, target_role, current_phase, created_at, updated_at FROM sessions WHERE id = ?", (session_id,))
+    cursor.execute("SELECT id, user_id, title, target_role, current_phase, created_at, updated_at FROM sessions WHERE id = ?", (session_id,))
     row = cursor.fetchone()
     conn.close()
     
@@ -113,11 +120,68 @@ def get_session(session_id: str) -> Optional[Dict]:
     return {
         "session_id": row[0],
         "user_id": row[1],
-        "target_role": row[2],
-        "current_phase": row[3],
-        "created_at": row[4],
-        "updated_at": row[5]
+        "title": row[2],
+        "target_role": row[3],
+        "current_phase": row[4],
+        "created_at": row[5],
+        "updated_at": row[6]
     }
+
+def list_sessions(user_id: Optional[str] = None, limit: int = 100) -> List[Dict]:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    safe_limit = max(1, min(limit, 500))
+    if user_id:
+        cursor.execute("""
+            SELECT id, user_id, title, target_role, current_phase, created_at, updated_at
+            FROM sessions
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+        """, (user_id, safe_limit))
+    else:
+        cursor.execute("""
+            SELECT id, user_id, title, target_role, current_phase, created_at, updated_at
+            FROM sessions
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+        """, (safe_limit,))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [
+        {
+            "session_id": row[0],
+            "user_id": row[1],
+            "title": row[2],
+            "target_role": row[3],
+            "current_phase": row[4],
+            "created_at": row[5],
+            "updated_at": row[6],
+        }
+        for row in rows
+    ]
+
+def delete_session(session_id: str) -> bool:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+    exists = cursor.fetchone() is not None
+    if exists:
+        cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM emotion_records WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM skill_records WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM resume_states WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        conn.commit()
+
+    conn.close()
+    return exists
 
 def update_session(session_id: str, **kwargs):
     init_sync_db()
@@ -153,6 +217,12 @@ def save_message(session_id: str, role: str, content: str, intent: Optional[str]
         INSERT INTO messages (session_id, role, content, intent, created_at)
         VALUES (?, ?, ?, ?, ?)
     """, (session_id, role, content, intent, now))
+
+    cursor.execute("""
+        UPDATE sessions
+        SET updated_at = ?
+        WHERE id = ?
+    """, (now, session_id))
     
     conn.commit()
     conn.close()

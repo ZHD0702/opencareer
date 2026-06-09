@@ -30,7 +30,8 @@ class CareersConfig:
     MCP_PORT = int(os.getenv("CAREER_MCP_PORT", "8001"))
     
     # 记忆配置
-    MEMORY_DIR = Path(os.getenv("CAREER_MEMORY_DIR", "./data/memory"))
+    _memory_dir = Path(os.getenv("CAREER_MEMORY_DIR", "./web/memory"))
+    MEMORY_DIR = _memory_dir if _memory_dir.is_absolute() else _project_root / _memory_dir
     MEMORY_FILE = os.getenv("CAREER_MEMORY_FILE", "career_memory.json")
     
     # DeepSeek 配置
@@ -42,6 +43,12 @@ class CareersConfig:
         """获取记忆文件完整路径"""
         cls.MEMORY_DIR.mkdir(parents=True, exist_ok=True)
         return cls.MEMORY_DIR / cls.MEMORY_FILE
+
+    @classmethod
+    def get_session_memory_path(cls, session_id: str) -> Path:
+        """获取指定会话的长期记忆文件路径"""
+        cls.MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        return cls.MEMORY_DIR / f"career_memory_{session_id}.json"
     
     @classmethod
     def is_career_agent_enabled(cls) -> bool:
