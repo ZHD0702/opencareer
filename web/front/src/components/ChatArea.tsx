@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef } from "react"
+import { motion } from "framer-motion"
+import { FileText } from "lucide-react"
 import { useSSEChat } from "../hooks/useSSEChat"
 import { useChatStore } from "../stores/chatStore"
 import { useSessionStore } from "../stores/sessionStore"
@@ -9,6 +11,10 @@ export function ChatArea() {
   const sessionId = useSessionStore((s) => s.sessionId)
   const setSessionId = useSessionStore((s) => s.setSessionId)
   const hydrateMessages = useChatStore((s) => s.hydrateMessages)
+  const setResumePdf = useChatStore((s) => s.setResumePdf)
+  const resumePdf = useChatStore((s) => s.resumePdf)
+  const resumePanelOpen = useChatStore((s) => s.resumePanelOpen)
+  const setResumePanelOpen = useChatStore((s) => s.setResumePanelOpen)
   const { sendMessage } = useSSEChat(sessionId)
   const creatingRef = useRef<Promise<string | null> | null>(null)
   const restoredSessionRef = useRef<string | null>(null)
@@ -67,6 +73,7 @@ export function ChatArea() {
     if (!sessionId) {
       restoredSessionRef.current = null
       hydrateMessages([])
+      setResumePdf(null)
       return
     }
 
@@ -99,10 +106,38 @@ export function ChatArea() {
       .catch((err) => {
         console.error("Failed to restore session messages:", err)
       })
-  }, [sessionId, setSessionId, hydrateMessages])
+  }, [sessionId, setSessionId, hydrateMessages, setResumePdf])
+
+  useEffect(() => {
+    if (!sessionId) return
+
+    setResumePdf(null)
+    fetch(`/api/resume/${sessionId}/pdf`)
+      .then((res) => {
+        if (res.status === 404) return null
+        if (!res.ok) throw new Error(`Failed to load resume PDF: ${res.status}`)
+        return res.json()
+      })
+      .then((document) => {
+        if (document) setResumePdf(document, true)
+      })
+      .catch((err) => console.error("Failed to restore resume PDF:", err))
+  }, [sessionId, setResumePdf])
 
   return (
-    <main className="flex-1 flex flex-col min-w-0">
+    <main className="relative flex min-w-0 flex-1 flex-col">
+      {resumePdf && !resumePanelOpen && (
+        <motion.button
+          type="button"
+          initial={{ opacity: 0, x: 8 }}
+          animate={{ opacity: 1, x: 0 }}
+          onClick={() => setResumePanelOpen(true)}
+          className="absolute right-4 top-4 z-20 grid h-9 w-9 place-items-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+          title="打开简历预览"
+        >
+          <FileText className="h-4 w-4" />
+        </motion.button>
+      )}
       <div className="flex-1 overflow-hidden">
         <MessageList onRegenerate={() => {}} />
       </div>

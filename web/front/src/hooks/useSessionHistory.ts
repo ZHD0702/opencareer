@@ -38,7 +38,10 @@ export function useSessionHistory() {
     queryKey: ["sessions", streamFinishCount, resumeUpdateCount],
     queryFn: fetchSessions,
     staleTime: 10_000,
-    refetchOnWindowFocus: false,
+    retry: 10,
+    retryDelay: (attempt) => Math.min(1000 * (attempt + 1), 3000),
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
 
   const deleteMutation = useMutation({

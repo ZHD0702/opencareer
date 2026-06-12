@@ -45,7 +45,11 @@ echo 后端地址: http://localhost:8000
 echo MCP 地址:  http://localhost:8001/mcp
 start "OpenCareer Backend + MCP" /D "%BACKEND_DIR%" cmd /k "set CAREER_USE_MCP=true&&set HOST=127.0.0.1&&set PORT=8000&&python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
 
-timeout /t 2 /nobreak >nul
+echo 正在等待后端和 MCP 初始化完成...
+call :WAIT_FOR_BACKEND
+if errorlevel 1 (
+    echo 后端暂未就绪，前端仍会启动并自动重试连接。
+)
 
 echo.
 echo [4/4] 启动前端...
@@ -102,6 +106,19 @@ if errorlevel 1 (
     exit /b 1
 )
 exit /b 0
+
+:WAIT_FOR_BACKEND
+set /a BACKEND_WAIT_COUNT=0
+:WAIT_FOR_BACKEND_LOOP
+powershell -NoProfile -Command "try { $response = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 2; if ($response.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>nul
+if not errorlevel 1 (
+    echo 后端和 MCP 已就绪。
+    exit /b 0
+)
+set /a BACKEND_WAIT_COUNT+=1
+if %BACKEND_WAIT_COUNT% GEQ 30 exit /b 1
+timeout /t 1 /nobreak >nul
+goto WAIT_FOR_BACKEND_LOOP
 
 :FAILED
 echo.

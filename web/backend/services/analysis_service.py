@@ -5,9 +5,10 @@ import sqlite3
 
 from db.crud import (
     get_messages, save_emotion_record, get_emotion_records,
-    get_skill_records, get_session
+    get_skill_records, get_pending_skill_follow_up, get_session, list_skill_evidence, upsert_skill_evidence
 )
 from services.resume_builder_service import ResumeBuilderService
+from services.career_tracking_service import get_skill_evidence_chains
 
 
 class AnalysisService:
@@ -112,46 +113,23 @@ class AnalysisService:
             if not session:
                 return None
             
-            records = get_skill_records(session_id)
-            
-            skills = []
-            gaps = []
-            total_match = 0
-            
-            for record in records:
-                skill = {
-                    "name": record.get("skill_name", ""),
-                    "level": record.get("level", 0),
-                    "required": record.get("required_level", 5),
-                    "category": record.get("category", "general")
-                }
-                skills.append(skill)
-                
-                gap = skill["required"] - skill["level"]
-                if gap > 0:
-                    gaps.append({
-                        "skill": skill["name"],
-                        "gap": gap,
-                        "suggestion": self._generate_skill_suggestion(skill)
-                    })
-                
-                total_match += min(skill["level"], skill["required"])
-            
-            match_rate = int((total_match / (len(skills) * 10)) * 100) if skills else 0
-            
-            if not skills:
-                skills = [
-                    {"name": "编程能力", "level": 5, "required": 7, "category": "technical"},
-                    {"name": "沟通能力", "level": 6, "required": 8, "category": "soft"},
-                    {"name": "学习能力", "level": 7, "required": 8, "category": "cognitive"}
-                ]
+            skills = list_skill_evidence(session_id)
+            chains = get_skill_evidence_chains(session_id)
+            for skill in skills:
+                skill["evidence_chain"] = chains.get(skill["skill_name"], [])
+            counts = {
+                "proven": sum(1 for item in skills if item["status"] == "proven"),
+                "mentioned": sum(1 for item in skills if item["status"] == "mentioned"),
+                "gap": sum(1 for item in skills if item["status"] == "gap"),
+            }
             
             return {
                 "session_id": session_id,
                 "target_role": session.get("target_role", "通用职业"),
-                "match_rate": match_rate,
+                "counts": counts,
                 "skills": skills,
-                "gaps": gaps
+                "gaps": [item for item in skills if item["status"] == "gap"],
+                "pending_follow_up": get_pending_skill_follow_up(session_id),
             }
         except Exception as e:
             print(f"[AnalysisService] get_skill_assessment error: {e}")
@@ -173,6 +151,10 @@ class AnalysisService:
         if target_role:
             from db.crud import update_session
             update_session(session_id, target_role=target_role)
+        for skill in skills or []:
+            name = skill.get("skill_name") or skill.get("name")
+            if name:
+                upsert_skill_evidence(session_id, {**skill, "skill_name": name, "source": "manual"})
         
         return self.get_skill_assessment(session_id)
     

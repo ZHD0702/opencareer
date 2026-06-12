@@ -70,6 +70,81 @@ def init_sync_db():
     """)
 
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS job_applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            company TEXT NOT NULL,
+            role TEXT NOT NULL,
+            stage TEXT NOT NULL DEFAULT 'saved',
+            next_action TEXT,
+            deadline TEXT,
+            jd_text TEXT,
+            note TEXT,
+            source TEXT DEFAULT 'manual',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS skill_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            category TEXT DEFAULT '通用',
+            evidence TEXT,
+            requirement TEXT,
+            suggestion TEXT,
+            source TEXT DEFAULT 'conversation',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(session_id, skill_name),
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS skill_evidence_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            skill_name TEXT NOT NULL,
+            context_key TEXT,
+            scenario TEXT,
+            task TEXT,
+            action TEXT,
+            result TEXT,
+            metric TEXT,
+            user_role TEXT,
+            used_at TEXT,
+            raw_text TEXT,
+            source TEXT DEFAULT 'conversation',
+            confidence REAL DEFAULT 0.5,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS skill_follow_ups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            evidence_id INTEGER,
+            skill_name TEXT NOT NULL,
+            missing_field TEXT NOT NULL,
+            question TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            asked_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(id),
+            FOREIGN KEY (evidence_id) REFERENCES skill_evidence_items(id)
+        )
+    """)
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS resume_states (
             session_id TEXT PRIMARY KEY,
             state_json TEXT NOT NULL,
@@ -77,6 +152,35 @@ def init_sync_db():
             FOREIGN KEY (session_id) REFERENCES sessions(id)
         )
     """)
+
+    cursor.execute("PRAGMA table_info(resume_documents)")
+    resume_document_columns = {row[1] for row in cursor.fetchall()}
+    if resume_document_columns and "id" not in resume_document_columns:
+        cursor.execute("ALTER TABLE resume_documents RENAME TO resume_documents_legacy")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS resume_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        )
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_resume_documents_session_created
+        ON resume_documents(session_id, created_at DESC)
+    """)
+
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resume_documents_legacy'")
+    if cursor.fetchone():
+        cursor.execute("""
+            INSERT INTO resume_documents (session_id, file_path, file_name, created_at)
+            SELECT session_id, file_path, file_name, COALESCE(updated_at, created_at)
+            FROM resume_documents_legacy
+        """)
+        cursor.execute("DROP TABLE resume_documents_legacy")
     
     conn.commit()
     conn.close()
@@ -176,12 +280,113 @@ def delete_session(session_id: str) -> bool:
         cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         cursor.execute("DELETE FROM emotion_records WHERE session_id = ?", (session_id,))
         cursor.execute("DELETE FROM skill_records WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM skill_follow_ups WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM skill_evidence_items WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM skill_evidence WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM job_applications WHERE session_id = ?", (session_id,))
         cursor.execute("DELETE FROM resume_states WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM resume_documents WHERE session_id = ?", (session_id,))
         cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         conn.commit()
 
     conn.close()
     return exists
+
+
+def save_resume_document(session_id: str, file_path: str, file_name: str) -> Dict:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = datetime.utcnow().isoformat()
+
+    cursor.execute("""
+        INSERT INTO resume_documents (session_id, file_path, file_name, created_at)
+        VALUES (?, ?, ?, ?)
+    """, (session_id, file_path, file_name, now))
+    document_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    return {
+        "id": document_id,
+        "session_id": session_id,
+        "file_path": file_path,
+        "file_name": file_name,
+        "created_at": now,
+    }
+
+
+def get_resume_document(session_id: str) -> Optional[Dict]:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, session_id, file_path, file_name, created_at
+        FROM resume_documents
+        WHERE session_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    """, (session_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "session_id": row[1],
+        "file_path": row[2],
+        "file_name": row[3],
+        "created_at": row[4],
+    }
+
+
+def get_resume_document_by_id(session_id: str, document_id: int) -> Optional[Dict]:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, session_id, file_path, file_name, created_at
+        FROM resume_documents
+        WHERE session_id = ? AND id = ?
+    """, (session_id, document_id))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "session_id": row[1],
+        "file_path": row[2],
+        "file_name": row[3],
+        "created_at": row[4],
+    }
+
+
+def list_resume_documents(session_id: str) -> List[Dict]:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, session_id, file_path, file_name, created_at
+        FROM resume_documents
+        WHERE session_id = ?
+        ORDER BY created_at DESC, id DESC
+    """, (session_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": row[0],
+            "session_id": row[1],
+            "file_path": row[2],
+            "file_name": row[3],
+            "created_at": row[4],
+        }
+        for row in rows
+    ]
 
 def update_session(session_id: str, **kwargs):
     init_sync_db()
@@ -328,6 +533,216 @@ def get_skill_records(session_id: str) -> List[Dict]:
         }
         for row in rows
     ]
+
+
+def list_job_applications(session_id: str) -> List[Dict]:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT * FROM job_applications
+        WHERE session_id = ?
+        ORDER BY updated_at DESC, id DESC
+    """, (session_id,)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def save_job_application(session_id: str, data: Dict) -> Dict:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    now = datetime.utcnow().isoformat()
+    card_id = data.get("id")
+    if card_id:
+        allowed = ["company", "role", "stage", "next_action", "deadline", "jd_text", "note", "source"]
+        fields = [key for key in allowed if key in data]
+        if fields:
+            values = [data[key] for key in fields]
+            assignments = ", ".join(f"{key} = ?" for key in fields)
+            conn.execute(
+                f"UPDATE job_applications SET {assignments}, updated_at = ? WHERE id = ? AND session_id = ?",
+                (*values, now, card_id, session_id),
+            )
+    else:
+        cursor = conn.execute("""
+            INSERT INTO job_applications
+            (session_id, company, role, stage, next_action, deadline, jd_text, note, source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            session_id, data.get("company", "待确认公司"), data.get("role", "待确认岗位"),
+            data.get("stage", "saved"), data.get("next_action"), data.get("deadline"),
+            data.get("jd_text"), data.get("note"), data.get("source", "manual"), now, now,
+        ))
+        card_id = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM job_applications WHERE id = ?", (card_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def delete_job_application(session_id: str, card_id: int) -> bool:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.execute("DELETE FROM job_applications WHERE id = ? AND session_id = ?", (card_id, session_id))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def upsert_skill_evidence(session_id: str, data: Dict) -> Dict:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    now = datetime.utcnow().isoformat()
+    conn.execute("""
+        INSERT INTO skill_evidence
+        (session_id, skill_name, status, category, evidence, requirement, suggestion, source, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id, skill_name) DO UPDATE SET
+            status = CASE
+                WHEN skill_evidence.status = 'proven' AND excluded.status = 'gap' THEN 'proven'
+                ELSE excluded.status
+            END,
+            category = excluded.category,
+            evidence = COALESCE(excluded.evidence, skill_evidence.evidence),
+            requirement = COALESCE(excluded.requirement, skill_evidence.requirement),
+            suggestion = COALESCE(excluded.suggestion, skill_evidence.suggestion),
+            source = excluded.source,
+            updated_at = excluded.updated_at
+    """, (
+        session_id, data["skill_name"], data.get("status", "mentioned"), data.get("category", "通用"),
+        data.get("evidence"), data.get("requirement"), data.get("suggestion"), data.get("source", "conversation"),
+        now, now,
+    ))
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM skill_evidence WHERE session_id = ? AND skill_name = ?",
+        (session_id, data["skill_name"]),
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def list_skill_evidence(session_id: str) -> List[Dict]:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT * FROM skill_evidence
+        WHERE session_id = ?
+        ORDER BY CASE status WHEN 'gap' THEN 0 WHEN 'mentioned' THEN 1 ELSE 2 END, updated_at DESC
+    """, (session_id,)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def save_skill_evidence_item(session_id: str, data: Dict) -> Dict:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    now = datetime.utcnow().isoformat()
+    evidence_id = data.get("id")
+    fields = (
+        "skill_name", "context_key", "scenario", "task", "action", "result",
+        "metric", "user_role", "used_at", "raw_text", "source", "confidence",
+    )
+    if evidence_id:
+        updates = [key for key in fields if key in data and data.get(key) is not None]
+        if updates:
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            conn.execute(
+                f"UPDATE skill_evidence_items SET {assignments}, updated_at = ? WHERE id = ? AND session_id = ?",
+                (*[data[key] for key in updates], now, evidence_id, session_id),
+            )
+    else:
+        cursor = conn.execute("""
+            INSERT INTO skill_evidence_items
+            (session_id, skill_name, context_key, scenario, task, action, result, metric,
+             user_role, used_at, raw_text, source, confidence, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            session_id, data["skill_name"], data.get("context_key"), data.get("scenario"),
+            data.get("task"), data.get("action"), data.get("result"), data.get("metric"),
+            data.get("user_role"), data.get("used_at"), data.get("raw_text"),
+            data.get("source", "conversation"), data.get("confidence", 0.5), now, now,
+        ))
+        evidence_id = cursor.lastrowid
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM skill_evidence_items WHERE id = ? AND session_id = ?",
+        (evidence_id, session_id),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def list_skill_evidence_items(session_id: str, skill_name: Optional[str] = None) -> List[Dict]:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    if skill_name:
+        rows = conn.execute("""
+            SELECT * FROM skill_evidence_items
+            WHERE session_id = ? AND skill_name = ?
+            ORDER BY updated_at DESC, id DESC
+        """, (session_id, skill_name)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT * FROM skill_evidence_items
+            WHERE session_id = ?
+            ORDER BY updated_at DESC, id DESC
+        """, (session_id,)).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_pending_skill_follow_up(session_id: str) -> Optional[Dict]:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("""
+        SELECT * FROM skill_follow_ups
+        WHERE session_id = ? AND status = 'pending'
+        ORDER BY updated_at DESC, id DESC LIMIT 1
+    """, (session_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_skill_follow_up(session_id: str, data: Dict) -> Dict:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    now = datetime.utcnow().isoformat()
+    conn.execute(
+        "UPDATE skill_follow_ups SET status = 'superseded', updated_at = ? WHERE session_id = ? AND status = 'pending'",
+        (now, session_id),
+    )
+    cursor = conn.execute("""
+        INSERT INTO skill_follow_ups
+        (session_id, evidence_id, skill_name, missing_field, question, status, asked_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+    """, (
+        session_id, data.get("evidence_id"), data["skill_name"], data["missing_field"],
+        data["question"], data.get("asked_count", 0), now, now,
+    ))
+    conn.commit()
+    row = conn.execute("SELECT * FROM skill_follow_ups WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def resolve_skill_follow_up(session_id: str, follow_up_id: int) -> None:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE skill_follow_ups SET status = 'answered', updated_at = ? WHERE id = ? AND session_id = ?",
+        (datetime.utcnow().isoformat(), follow_up_id, session_id),
+    )
+    conn.commit()
+    conn.close()
 
 def get_resume_state(session_id: str) -> Optional[Dict]:
     init_sync_db()

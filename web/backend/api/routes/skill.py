@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from typing import Optional
+from pydantic import BaseModel, Field
 import logging
 
-from api.schemas import SkillAssessmentResponse
 from api.exceptions import SessionNotFoundException
 from services.analysis_service import AnalysisService
 
@@ -10,7 +10,12 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/skill-assessment/{session_id}", response_model=SkillAssessmentResponse)
+class SkillAssessmentUpdate(BaseModel):
+    target_role: Optional[str] = None
+    skills: list[dict] = Field(default_factory=list)
+
+
+@router.get("/skill-assessment/{session_id}")
 async def get_skill_assessment(session_id: str):
     """
     获取技能评估
@@ -30,7 +35,7 @@ async def get_skill_assessment(session_id: str):
         
         logger.info(f"获取技能评估: session_id={session_id}")
         
-        return SkillAssessmentResponse(**assessment)
+        return assessment
     except SessionNotFoundException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except HTTPException:
@@ -40,8 +45,8 @@ async def get_skill_assessment(session_id: str):
         raise HTTPException(status_code=500, detail="获取技能评估失败，请稍后重试")
 
 
-@router.patch("/skill-assessment/{session_id}", response_model=SkillAssessmentResponse)
-async def update_skill_assessment(session_id: str, target_role: Optional[str] = None, skills: Optional[list] = None):
+@router.patch("/skill-assessment/{session_id}")
+async def update_skill_assessment(session_id: str, payload: SkillAssessmentUpdate):
     """
     更新技能评估
     
@@ -55,14 +60,14 @@ async def update_skill_assessment(session_id: str, target_role: Optional[str] = 
     """
     try:
         analysis_service = AnalysisService()
-        assessment = analysis_service.update_skill_assessment(session_id, target_role, skills)
+        assessment = analysis_service.update_skill_assessment(session_id, payload.target_role, payload.skills)
         
         if not assessment:
             raise SessionNotFoundException(session_id)
         
         logger.info(f"更新技能评估: session_id={session_id}")
         
-        return SkillAssessmentResponse(**assessment)
+        return assessment
     except SessionNotFoundException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except HTTPException:

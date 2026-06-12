@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, type FormEvent, type KeyboardEvent } from "react"
+import { useState, useRef, useCallback, useEffect, type FormEvent, type KeyboardEvent } from "react"
 import { motion } from "framer-motion"
 import { Send } from "lucide-react"
 import { useChatStore } from "../stores/chatStore"
@@ -24,6 +24,19 @@ export function ChatInput({ onSend }: ChatInputProps) {
     el.style.height = "auto"
     el.style.height = Math.min(el.scrollHeight, 160) + "px"
   }, [])
+
+  useEffect(() => {
+    const prefill = (event: Event) => {
+      const text = (event as CustomEvent<string>).detail || ""
+      setInput(text)
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus()
+        autoGrow()
+      })
+    }
+    window.addEventListener("prefill-chat", prefill)
+    return () => window.removeEventListener("prefill-chat", prefill)
+  }, [autoGrow])
 
   const handleChange = (value: string) => {
     setInput(value)

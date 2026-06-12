@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import traceback
 
-from api.routes import chat, sessions, emotion, skill, resume, mcp
+from api.routes import chat, sessions, emotion, skill, resume, mcp, progress
 from api.routes import careers, orchestrator
 from db.crud import init_sync_db
 from careers_config import config
@@ -149,6 +149,7 @@ app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(careers.router, prefix="/api", tags=["careers"])
 app.include_router(emotion.router, prefix="/api", tags=["emotion"])
 app.include_router(skill.router, prefix="/api", tags=["skill"])
+app.include_router(progress.router, prefix="/api", tags=["job-progress"])
 app.include_router(resume.router, prefix="/api", tags=["resume"])
 app.include_router(mcp.router, prefix="/api", tags=["mcp"])
 app.include_router(orchestrator.router, prefix="/api", tags=["orchestrator", "llm", "knowledge"])

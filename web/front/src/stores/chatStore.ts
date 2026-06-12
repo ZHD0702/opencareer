@@ -36,6 +36,19 @@ export interface ResumeSnapshot {
   conflicts: Array<Record<string, string>>
 }
 
+export interface ResumePdfDocument {
+  id: number
+  session_id: string
+  filename: string
+  created_at: string | null
+  preview_url: string
+  download_url: string
+}
+
+export type CareerWorkspace =
+  | { type: "job"; itemId: string }
+  | { type: "skills"; itemId?: string }
+
 interface ChatState {
   messages: Message[]
   isStreaming: boolean
@@ -45,6 +58,9 @@ interface ChatState {
   demandAnalysis: Record<string, unknown> | null
   emotionAnalysis: EmotionSnapshot | null
   resumeUpdate: ResumeSnapshot | null
+  resumePdf: ResumePdfDocument | null
+  resumePanelOpen: boolean
+  careerWorkspace: CareerWorkspace | null
   resumeUpdateCount: number
   streamFinishCount: number
   messageFeedback: Record<string, FeedbackType>
@@ -60,6 +76,10 @@ interface ChatState {
   setDemandAnalysis: (data: Record<string, unknown> | null) => void
   setEmotionAnalysis: (data: EmotionSnapshot | null) => void
   setResumeUpdate: (data: ResumeSnapshot | null) => void
+  setResumePdf: (data: ResumePdfDocument | null, openPanel?: boolean) => void
+  setResumePanelOpen: (open: boolean) => void
+  openCareerWorkspace: (workspace: CareerWorkspace) => void
+  closeCareerWorkspace: () => void
   hydrateMessages: (messages: Array<Pick<Message, "id" | "role" | "content" | "timestamp">>) => void
   resetConversation: () => void
   setFeedback: (id: string, type: FeedbackType | null) => void
@@ -77,6 +97,9 @@ export const useChatStore = create<ChatState>((set) => ({
   demandAnalysis: null,
   emotionAnalysis: null,
   resumeUpdate: null,
+  resumePdf: null,
+  resumePanelOpen: false,
+  careerWorkspace: null,
   resumeUpdateCount: 0,
   streamFinishCount: 0,
   messageFeedback: {},
@@ -196,6 +219,20 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) => ({ resumeUpdate: data, resumeUpdateCount: s.resumeUpdateCount + 1 }))
   },
 
+  setResumePdf: (data, openPanel = true) => {
+    set({ resumePdf: data, resumePanelOpen: Boolean(data) && openPanel, careerWorkspace: null })
+  },
+
+  setResumePanelOpen: (open) => {
+    set((state) => ({ resumePanelOpen: Boolean(state.resumePdf) && open }))
+  },
+
+  openCareerWorkspace: (workspace) => {
+    set({ careerWorkspace: workspace, resumePanelOpen: false })
+  },
+
+  closeCareerWorkspace: () => set({ careerWorkspace: null }),
+
   hydrateMessages: (messages) => {
     const maxNumericId = messages.reduce((max, message) => {
       const numeric = Number(message.id)
@@ -225,6 +262,9 @@ export const useChatStore = create<ChatState>((set) => ({
       demandAnalysis: null,
       emotionAnalysis: null,
       resumeUpdate: null,
+      resumePdf: null,
+      resumePanelOpen: false,
+      careerWorkspace: null,
       messageFeedback: {},
     })
   },

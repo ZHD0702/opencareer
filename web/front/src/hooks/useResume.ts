@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useChatStore } from "../stores/chatStore"
+import type { ResumePdfDocument } from "../stores/chatStore"
 
 export interface ResumeData {
   grade_level: string | null
@@ -115,4 +116,24 @@ export function useResume(sessionId: string | null) {
   })
 
   return { ...query, mutation }
+}
+
+async function fetchResumeDocuments(sessionId: string): Promise<ResumePdfDocument[]> {
+  const res = await fetch(`/api/resume/${sessionId}/pdfs`)
+  if (!res.ok) {
+    throw new Error(`Failed to fetch resume documents: ${res.status}`)
+  }
+  return res.json()
+}
+
+export function useResumeDocuments(sessionId: string | null) {
+  const activeDocument = useChatStore((s) => s.resumePdf)
+
+  return useQuery({
+    queryKey: ["resume-documents", sessionId, activeDocument?.id],
+    queryFn: () => fetchResumeDocuments(sessionId!),
+    enabled: !!sessionId,
+    staleTime: 5_000,
+    refetchOnWindowFocus: true,
+  })
 }

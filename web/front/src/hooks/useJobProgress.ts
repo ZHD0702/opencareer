@@ -7,6 +7,11 @@ export interface JobCard {
   role: string
   date: string
   note?: string | null
+  stage: string
+  next_action?: string | null
+  deadline?: string | null
+  jd_text?: string | null
+  source?: string | null
 }
 
 export interface JobProgressData {
@@ -24,7 +29,7 @@ async function fetchJobProgress(sessionId: string): Promise<JobProgressData> {
 
 async function createJobCard(
   sessionId: string,
-  payload: { stage: string; company: string; role: string; date?: string; note?: string },
+  payload: Partial<JobCard> & { stage: string; company: string; role: string },
 ): Promise<JobCard> {
   const res = await fetch(`/api/job-progress/${sessionId}`, {
     method: "POST",
@@ -50,6 +55,16 @@ async function moveJobCard(
   if (!res.ok) {
     throw new Error(`Failed to move job card: ${res.status}`)
   }
+  return res.json()
+}
+
+async function updateJobCard(sessionId: string, cardId: string, payload: Partial<JobCard>): Promise<JobCard> {
+  const res = await fetch(`/api/job-progress/${sessionId}/${cardId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`Failed to update job card: ${res.status}`)
   return res.json()
 }
 
@@ -79,7 +94,7 @@ export function useJobProgress(sessionId: string | null) {
   })
 
   const createMutation = useMutation({
-    mutationFn: (payload: { stage: string; company: string; role: string; date?: string; note?: string }) =>
+    mutationFn: (payload: Partial<JobCard> & { stage: string; company: string; role: string }) =>
       createJobCard(sessionId!, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["job-progress", sessionId] })
@@ -101,5 +116,11 @@ export function useJobProgress(sessionId: string | null) {
     },
   })
 
-  return { ...query, createMutation, moveMutation, deleteMutation }
+  const updateMutation = useMutation({
+    mutationFn: ({ cardId, payload }: { cardId: string; payload: Partial<JobCard> }) =>
+      updateJobCard(sessionId!, cardId, payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["job-progress", sessionId] }),
+  })
+
+  return { ...query, createMutation, moveMutation, updateMutation, deleteMutation }
 }

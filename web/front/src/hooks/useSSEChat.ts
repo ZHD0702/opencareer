@@ -12,6 +12,7 @@ export function useSSEChat(session_id: string | null) {
     setDemandAnalysis,
     setEmotionAnalysis,
     setResumeUpdate,
+    setResumePdf,
   } = useChatStore()
   const eventSourceRef = useRef<EventSource | null>(null)
 
@@ -81,6 +82,9 @@ export function useSSEChat(session_id: string | null) {
               case 'resume_update':
                 setResumeUpdate(data.data)
                 break
+              case 'resume_pdf':
+                setResumePdf(data.data, true)
+                break
               case 'error':
                 console.error('SSE error:', data.message)
                 finishStreaming()
@@ -99,7 +103,7 @@ export function useSSEChat(session_id: string | null) {
       setTyping(false)
       setIsConnected(false)
     }
-  }, [session_id, addMessage, setTyping, addFragment, finishStreaming, setStatus, setDemandAnalysis, setEmotionAnalysis, setResumeUpdate])
+  }, [session_id, addMessage, setTyping, addFragment, finishStreaming, setStatus, setDemandAnalysis, setEmotionAnalysis, setResumeUpdate, setResumePdf])
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {

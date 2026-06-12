@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 import json
 import logging
 import asyncio
+import re
 
 from api.exceptions import SessionNotFoundException, LLMServiceException
 from db.crud import save_message, get_messages, get_session, update_session
@@ -12,6 +13,8 @@ from services.chat_style import GUI_FRIENDLY_STYLE_PROMPT, apply_gui_style_to_ca
 from services.emotion_guard import EmotionGuard
 from services.resume_builder_service import ResumeBuilderService
 from services.session_title_service import generate_session_title
+from services.resume_pdf_service import find_new_resume_pdf, register_resume_pdf, snapshot_resume_pdfs
+from services.career_tracking_service import update_career_tracking
 from utils.text_fragmenter import TextFragmenter
 
 router = APIRouter()
@@ -21,7 +24,7 @@ logger = logging.getLogger(__name__)
 _career_agents = {}
 
 
-def _build_resume_chat_hint(resume_update: dict) -> str:
+def _build_resume_chat_hint(resume_update: dict, include_question: bool = True) -> str:
     changes = resume_update.get("changes") or []
     preview = resume_update.get("latest_preview")
     questions = resume_update.get("next_questions") or []
@@ -36,10 +39,15 @@ def _build_resume_chat_hint(resume_update: dict) -> str:
     parts = []
     if preview and preview.get("content"):
         parts.append(f"我先把这段记成简历话术：{preview['content']}")
-    if questions:
+    if questions and include_question:
         parts.append(f"接下来我想确认一个点：{questions[0]}")
 
     return "\n\n".join(parts)
+
+
+def _remove_existing_questions(text: str) -> str:
+    cleaned = re.sub(r"[^。！？!?\n]*[？?]", "", text)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
 async def _get_career_agent(session_id: str):
@@ -105,6 +113,13 @@ async def chat_stream(session_id: str, request: Request):
         emotion_guard = EmotionGuard()
         emotion_assessment = emotion_guard.assess(session_id, user_message.strip())
         resume_update = await ResumeBuilderService().update_from_user_message_async(session_id, user_message.strip())
+        tracking_update = await update_career_tracking(
+            session_id,
+            user_message.strip(),
+            resume_update,
+            allow_follow_up=not emotion_assessment.should_intervene,
+        )
+        pdf_snapshot = snapshot_resume_pdfs()
         
         # 获取 CareerAgent 实例（优先使用）
         agent = None
@@ -124,6 +139,7 @@ async def chat_stream(session_id: str, request: Request):
                 emotion_event["session_id"] = session_id
                 yield f"data: {json.dumps({'type': 'emotion_analysis', 'data': emotion_event}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'resume_update', 'data': resume_update}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'career_tracking_update', 'data': tracking_update}, ensure_ascii=False)}\n\n"
                 
                 # 检查是否是 CareerAgent
                 if emotion_assessment.should_intervene:
@@ -171,9 +187,14 @@ async def chat_stream(session_id: str, request: Request):
                                     pass
                             # 不发送事件，只收集内容
 
-                resume_hint = _build_resume_chat_hint(resume_update)
+                skill_follow_up = tracking_update.get("follow_up")
+                resume_hint = _build_resume_chat_hint(resume_update, include_question=not skill_follow_up)
                 if resume_hint and not emotion_assessment.should_intervene:
                     full_ai_response.append(f"\n\n{resume_hint}")
+                if skill_follow_up and not emotion_assessment.should_intervene:
+                    response_without_questions = _remove_existing_questions("".join(full_ai_response))
+                    full_ai_response[:] = [response_without_questions] if response_without_questions else []
+                    full_ai_response.append(f"\n\n{skill_follow_up['question']}")
                 
                 # 发送"对方正在输入结束"信号
                 yield f"data: {json.dumps({'type': 'typing_end'})}\n\n"
@@ -220,6 +241,20 @@ async def chat_stream(session_id: str, request: Request):
                     # 保存原始回复到数据库（不含语气词）
                     logger.info(f"保存 AI 回复到数据库: {len(full_text)} 字符")
                     save_message(session_id, "ai", full_text)
+
+                generated_pdf = find_new_resume_pdf(pdf_snapshot)
+                if generated_pdf:
+                    document = register_resume_pdf(session_id, generated_pdf)
+                    version = document.get("updated_at") or document.get("created_at") or ""
+                    pdf_event = {
+                        "id": document["id"],
+                        "session_id": session_id,
+                        "filename": document["file_name"],
+                        "created_at": document.get("created_at"),
+                        "preview_url": f"/api/resume/{session_id}/pdfs/{document['id']}/content?v={version}",
+                        "download_url": f"/api/resume/{session_id}/pdfs/{document['id']}/download",
+                    }
+                    yield f"data: {json.dumps({'type': 'resume_pdf', 'data': pdf_event}, ensure_ascii=False)}\n\n"
                 
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 
