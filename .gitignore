@@ -237,3 +237,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 生成的简历/输出文件
+outputs/
+
+# 临时测试文件
+web/backend/test_*.py
+
+# 其他不需要提交的文件/目录
+*.log
+.env
