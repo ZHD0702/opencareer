@@ -127,6 +127,7 @@ function ResumeDocumentRow({
       </button>
       <a
         href={document.download_url}
+        download={document.filename}
         className="grid h-7 w-7 shrink-0 place-items-center rounded text-sidebar-muted transition-colors hover:bg-muted hover:text-sidebar-foreground"
         title="下载 PDF"
       >

@@ -1,0 +1,53 @@
+{
+  "format": "chinese",
+  "contact": {
+    "name": "小明",
+    "title": "Java后端实习生（实习）",
+    "location": "南京",
+    "phone": "111111111111",
+    "email": "xiaoming@163.com"
+  },
+  "summary": "小明，面向Java后端实习生，属于实习方向，具备应届生经验，可围绕事实、结果和证据组织投递内容。",
+  "sections": [
+    {
+      "title": "教育背景",
+      "items": [
+        {
+          "heading": "软件工程专业，大四",
+          "bullets": []
+        }
+      ]
+    },
+    {
+      "title": "项目经历",
+      "items": [
+        {
+          "heading": "代表项目",
+          "bullets": [
+            "校园二手书交易平台（Spring Boot）：独立完成后端开发，通过缓存和异步队列优化系统性能，解决了高并发场景下的稳定性问题"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "技能清单",
+      "items": [
+        {
+          "heading": "核心技能",
+          "bullets": [
+            "Java",
+            "Spring Boot",
+            "MySQL",
+            "Redis",
+            "后端开发"
+          ]
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "job_type": "实习",
+    "industry": "",
+    "experience_years": "应届生"
+  }
+}

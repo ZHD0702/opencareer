@@ -25,7 +25,7 @@ class CareersConfig:
     USE_MCP = os.getenv("CAREER_USE_MCP", "false").lower() == "true"
     
     # MCP 配置
-    MCP_URL = os.getenv("CAREER_MCP_URL", "http://localhost:8001/mcp")
+    MCP_URL = os.getenv("CAREER_MCP_URL", "http://127.0.0.1:8001/mcp")
     MCP_HOST = os.getenv("CAREER_MCP_HOST", "127.0.0.1")
     MCP_PORT = int(os.getenv("CAREER_MCP_PORT", "8001"))
     

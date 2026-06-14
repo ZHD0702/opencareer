@@ -1,0 +1,62 @@
+{
+  "format": "chinese",
+  "contact": {
+    "name": "小明",
+    "title": "Java后端开发实习生",
+    "location": "南京",
+    "phone": "11111111111",
+    "email": "xiaoming@163.com"
+  },
+  "summary": "小明，面向Java后端开发实习生，可围绕事实、结果和证据组织投递内容。",
+  "sections": [
+    {
+      "title": "教育背景",
+      "items": [
+        {
+          "heading": "南京信息工程大学 · 软件工程 · 大三",
+          "bullets": []
+        }
+      ]
+    },
+    {
+      "title": "项目经历",
+      "items": [
+        {
+          "heading": "代表项目",
+          "bullets": [
+            "基于Spring Boot + MyBatis + MySQL开发校园二手书交易系统，实现用户注册登录、商品浏览、订单创建等核心接口",
+            "使用Redis缓存热门书籍列表，降低数据库查询压力，提升首页加载速度",
+            "通过Spring事务管理控制订单创建流程，确保并发场景下数据一致性问题发生率降至0%"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "技能清单",
+      "items": [
+        {
+          "heading": "核心技能",
+          "bullets": [
+            "Java",
+            "Spring Boot",
+            "MyBatis",
+            "MySQL",
+            "Redis"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "证书与补充信息",
+      "items": [
+        {
+          "heading": "证书",
+          "bullets": [
+            "英语六级（CET-6）530分",
+            "校级二等奖学金"
+          ]
+        }
+      ]
+    }
+  ]
+}

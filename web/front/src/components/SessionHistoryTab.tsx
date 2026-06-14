@@ -149,9 +149,16 @@ export function SessionHistoryTab() {
                     </div>
                   </motion.div>
                 ) : (
-                  <button
-                    type="button"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleSwitchSession(session.session_id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        handleSwitchSession(session.session_id)
+                      }
+                    }}
                     className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors
                       ${session.session_id === activeSessionId
                         ? "border-primary/40 bg-primary/5"
@@ -201,7 +208,7 @@ export function SessionHistoryTab() {
                         <Trash2 className="w-3 h-3 text-red-400" />
                       </button>
                     </div>
-                  </button>
+                  </div>
                 )}
               </motion.div>
             ))}

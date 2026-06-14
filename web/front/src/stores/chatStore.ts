@@ -7,6 +7,36 @@ export interface Message {
   isStreaming: boolean
   timestamp: number
   emotion?: string
+  actions?: AssistantAction[]
+}
+
+export interface JobSearchPlan {
+  role: string
+  city: string
+  city_code: string
+  salary?: string | null
+  skills?: string[]
+  employment_type?: string | null
+  major?: string | null
+  industry?: string | null
+}
+
+export interface AssistantAction {
+  action: "start_job_matching"
+  label: string
+  query_plan: JobSearchPlan
+}
+
+export interface BrowserTaskState {
+  id: string
+  session_id: string
+  query_plan: JobSearchPlan
+  status: string
+  status_text: string
+  current_url: string
+  error?: string | null
+  matches?: Array<Record<string, unknown>>
+  total_candidates?: number
 }
 
 export type FeedbackType = "liked" | "disliked"
@@ -61,11 +91,14 @@ interface ChatState {
   resumePdf: ResumePdfDocument | null
   resumePanelOpen: boolean
   careerWorkspace: CareerWorkspace | null
+  browserTask: BrowserTaskState | null
+  browserPanelOpen: boolean
   resumeUpdateCount: number
   streamFinishCount: number
   messageFeedback: Record<string, FeedbackType>
 
   addMessage: (role: "user" | "ai", content?: string) => string
+  beginStreaming: () => void
   appendToken: (token: string) => void
   setDialogue: (content: string) => void
   breakFragment: () => void
@@ -80,7 +113,10 @@ interface ChatState {
   setResumePanelOpen: (open: boolean) => void
   openCareerWorkspace: (workspace: CareerWorkspace) => void
   closeCareerWorkspace: () => void
-  hydrateMessages: (messages: Array<Pick<Message, "id" | "role" | "content" | "timestamp">>) => void
+  attachAction: (action: AssistantAction) => void
+  setBrowserTask: (task: BrowserTaskState | null, openPanel?: boolean) => void
+  setBrowserPanelOpen: (open: boolean) => void
+  hydrateMessages: (messages: Array<Pick<Message, "id" | "role" | "content" | "timestamp" | "actions">>) => void
   resetConversation: () => void
   setFeedback: (id: string, type: FeedbackType | null) => void
   removeLastMessage: () => void
@@ -100,6 +136,8 @@ export const useChatStore = create<ChatState>((set) => ({
   resumePdf: null,
   resumePanelOpen: false,
   careerWorkspace: null,
+  browserTask: null,
+  browserPanelOpen: false,
   resumeUpdateCount: 0,
   streamFinishCount: 0,
   messageFeedback: {},
@@ -119,6 +157,8 @@ export const useChatStore = create<ChatState>((set) => ({
     }))
     return id
   },
+
+  beginStreaming: () => set({ isStreaming: true, isTyping: true }),
 
   appendToken: (token) => {
     set((s) => {
@@ -220,18 +260,38 @@ export const useChatStore = create<ChatState>((set) => ({
   },
 
   setResumePdf: (data, openPanel = true) => {
-    set({ resumePdf: data, resumePanelOpen: Boolean(data) && openPanel, careerWorkspace: null })
+    set({ resumePdf: data, resumePanelOpen: Boolean(data) && openPanel, careerWorkspace: null, browserPanelOpen: false })
   },
 
   setResumePanelOpen: (open) => {
-    set((state) => ({ resumePanelOpen: Boolean(state.resumePdf) && open }))
+    set((state) => ({ resumePanelOpen: Boolean(state.resumePdf) && open, browserPanelOpen: open ? false : state.browserPanelOpen }))
   },
 
   openCareerWorkspace: (workspace) => {
-    set({ careerWorkspace: workspace, resumePanelOpen: false })
+    set({ careerWorkspace: workspace, resumePanelOpen: false, browserPanelOpen: false })
   },
 
   closeCareerWorkspace: () => set({ careerWorkspace: null }),
+
+  attachAction: (action) => set((state) => {
+    const messages = [...state.messages]
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === "ai") {
+        messages[index] = { ...messages[index], actions: [...(messages[index].actions || []), action] }
+        break
+      }
+    }
+    return { messages }
+  }),
+
+  setBrowserTask: (task, openPanel = true) => set((state) => ({
+    browserTask: task,
+    browserPanelOpen: openPanel ? Boolean(task) : state.browserPanelOpen,
+    resumePanelOpen: openPanel && task ? false : state.resumePanelOpen,
+    careerWorkspace: openPanel && task ? null : state.careerWorkspace,
+  })),
+
+  setBrowserPanelOpen: (open) => set((state) => ({ browserPanelOpen: Boolean(state.browserTask) && open })),
 
   hydrateMessages: (messages) => {
     const maxNumericId = messages.reduce((max, message) => {
@@ -265,6 +325,8 @@ export const useChatStore = create<ChatState>((set) => ({
       resumePdf: null,
       resumePanelOpen: false,
       careerWorkspace: null,
+      browserTask: null,
+      browserPanelOpen: false,
       messageFeedback: {},
     })
   },

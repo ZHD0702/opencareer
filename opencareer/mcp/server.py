@@ -30,6 +30,8 @@ mcp = FastMCP(
     instructions="OpenCareer tools",
     host="127.0.0.1",
     port=8001,
+    stateless_http=True,
+    json_response=True,
 )
 
 # Register resume_skill as MCP tool (preserves type annotations)

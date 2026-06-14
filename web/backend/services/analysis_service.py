@@ -113,8 +113,8 @@ class AnalysisService:
             if not session:
                 return None
             
-            skills = list_skill_evidence(session_id)
             chains = get_skill_evidence_chains(session_id)
+            skills = list_skill_evidence(session_id)
             for skill in skills:
                 skill["evidence_chain"] = chains.get(skill["skill_name"], [])
             counts = {

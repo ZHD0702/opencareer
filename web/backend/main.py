@@ -10,11 +10,12 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import traceback
 
-from api.routes import chat, sessions, emotion, skill, resume, mcp, progress
+from api.routes import browser, chat, sessions, emotion, skill, resume, mcp, progress, job_search
 from api.routes import careers, orchestrator
 from db.crud import init_sync_db
 from careers_config import config
 from adapters.mcp_service import start_mcp_server, stop_mcp_server, get_mcp_service
+from services.browser_session_service import browser_session_service
 
 # 先加载项目根目录的 .env
 from pathlib import Path
@@ -63,6 +64,8 @@ async def lifespan(app: FastAPI):
     if config.USE_MCP:
         await stop_mcp_server()
         logger.info("✅ MCP 服务器已关闭")
+    await browser_session_service.close()
+    logger.info("✅ Playwright 浏览器会话已关闭")
 
 
 app = FastAPI(
@@ -150,6 +153,8 @@ app.include_router(careers.router, prefix="/api", tags=["careers"])
 app.include_router(emotion.router, prefix="/api", tags=["emotion"])
 app.include_router(skill.router, prefix="/api", tags=["skill"])
 app.include_router(progress.router, prefix="/api", tags=["job-progress"])
+app.include_router(browser.router, prefix="/api", tags=["browser"])
+app.include_router(job_search.router, prefix="/api", tags=["job-search"])
 app.include_router(resume.router, prefix="/api", tags=["resume"])
 app.include_router(mcp.router, prefix="/api", tags=["mcp"])
 app.include_router(orchestrator.router, prefix="/api", tags=["orchestrator", "llm", "knowledge"])

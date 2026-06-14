@@ -5,6 +5,7 @@ export function useSSEChat(session_id: string | null) {
   const [isConnected, setIsConnected] = useState(false)
   const {
     addMessage,
+    beginStreaming,
     setTyping,
     addFragment,
     finishStreaming,
@@ -13,6 +14,7 @@ export function useSSEChat(session_id: string | null) {
     setEmotionAnalysis,
     setResumeUpdate,
     setResumePdf,
+    attachAction,
   } = useChatStore()
   const eventSourceRef = useRef<EventSource | null>(null)
 
@@ -20,16 +22,29 @@ export function useSSEChat(session_id: string | null) {
     const activeSessionId = sessionIdOverride || session_id
     if (!activeSessionId) return
 
+    const controller = new AbortController()
+    let inactivityTimer: ReturnType<typeof setTimeout> | null = null
+    let receivedTerminalEvent = false
+    const resetInactivityTimer = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer)
+      inactivityTimer = setTimeout(() => controller.abort(), 65000)
+    }
+
     try {
       // Show the outgoing message and typing bubble immediately.
       addMessage('user', message)
-      setTyping(true)
+      beginStreaming()
 
       const response = await fetch(`/api/chat/${activeSessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),
+        signal: controller.signal,
       })
+
+      if (!response.ok) {
+        throw new Error(`Chat request failed: ${response.status}`)
+      }
 
       const reader = response.body?.getReader()
       if (!reader) {
@@ -40,10 +55,12 @@ export function useSSEChat(session_id: string | null) {
       const decoder = new TextDecoder()
       let buffer = ''
       setIsConnected(true)
+      resetInactivityTimer()
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        resetInactivityTimer()
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n\n')
@@ -66,6 +83,7 @@ export function useSSEChat(session_id: string | null) {
                 addFragment(data.content, data.emotion)
                 break
               case 'done':
+                receivedTerminalEvent = true
                 finishStreaming()
                 setTyping(false)
                 setIsConnected(false)
@@ -85,8 +103,13 @@ export function useSSEChat(session_id: string | null) {
               case 'resume_pdf':
                 setResumePdf(data.data, true)
                 break
+              case 'assistant_action':
+                attachAction(data.data)
+                break
               case 'error':
+                receivedTerminalEvent = true
                 console.error('SSE error:', data.message)
+                addFragment(data.message || '刚才这条消息没有处理成功，请再试一次。', 'serious')
                 finishStreaming()
                 setTyping(false)
                 setIsConnected(false)
@@ -99,11 +122,19 @@ export function useSSEChat(session_id: string | null) {
       }
     } catch (error) {
       console.error('SSE error:', error)
+      if (!receivedTerminalEvent) {
+        const message = controller.signal.aborted
+          ? '这次回复等待太久，已经自动停止了。请再发一次，我会接着当前对话继续。'
+          : '刚才这条消息没有处理成功。你可以稍等一下再发，我会接着当前对话继续。'
+        addFragment(message, 'serious')
+      }
+    } finally {
+      if (inactivityTimer) clearTimeout(inactivityTimer)
       finishStreaming()
       setTyping(false)
       setIsConnected(false)
     }
-  }, [session_id, addMessage, setTyping, addFragment, finishStreaming, setStatus, setDemandAnalysis, setEmotionAnalysis, setResumeUpdate, setResumePdf])
+  }, [session_id, addMessage, beginStreaming, setTyping, addFragment, finishStreaming, setStatus, setDemandAnalysis, setEmotionAnalysis, setResumeUpdate, setResumePdf, attachAction])
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {

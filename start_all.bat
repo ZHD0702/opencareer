@@ -41,9 +41,9 @@ if not exist "%FRONTEND_DIR%\node_modules" (
 
 echo.
 echo [3/4] 启动后端和 MCP...
-echo 后端地址: http://localhost:8000
+echo 后端地址: http://localhost:8002
 echo MCP 地址:  http://localhost:8001/mcp
-start "OpenCareer Backend + MCP" /D "%BACKEND_DIR%" cmd /k "set CAREER_USE_MCP=true&&set HOST=127.0.0.1&&set PORT=8000&&python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
+start "OpenCareer Backend + MCP" /D "%BACKEND_DIR%" cmd /k "set CAREER_USE_MCP=true&&set CAREER_MCP_URL=http://127.0.0.1:8001/mcp&&set HOST=127.0.0.1&&set PORT=8002&&python -m uvicorn main:app --host 127.0.0.1 --port 8002"
 
 echo 正在等待后端和 MCP 初始化完成...
 call :WAIT_FOR_BACKEND
@@ -110,7 +110,7 @@ exit /b 0
 :WAIT_FOR_BACKEND
 set /a BACKEND_WAIT_COUNT=0
 :WAIT_FOR_BACKEND_LOOP
-powershell -NoProfile -Command "try { $response = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8000/health' -TimeoutSec 2; if ($response.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>nul
+powershell -NoProfile -Command "try { $response = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8002/health' -TimeoutSec 2; if ($response.StatusCode -eq 200) { exit 0 } } catch {}; exit 1" >nul 2>nul
 if not errorlevel 1 (
     echo 后端和 MCP 已就绪。
     exit /b 0

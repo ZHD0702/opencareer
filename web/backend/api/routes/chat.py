@@ -14,7 +14,15 @@ from services.emotion_guard import EmotionGuard
 from services.resume_builder_service import ResumeBuilderService
 from services.session_title_service import generate_session_title
 from services.resume_pdf_service import find_new_resume_pdf, register_resume_pdf, snapshot_resume_pdfs
-from services.career_tracking_service import update_career_tracking
+from services.career_tracking_service import get_skill_evidence_chains, update_career_tracking
+from services.job_search_readiness import build_job_match_action
+from services.mcp_resume_service import (
+    build_resume_skill_payload,
+    build_incomplete_resume_response,
+    call_resume_skill,
+    is_resume_pdf_request,
+    validate_resume_payload,
+)
 from utils.text_fragmenter import TextFragmenter
 
 router = APIRouter()
@@ -22,32 +30,49 @@ logger = logging.getLogger(__name__)
 
 # 全局 CareerAgent 实例管理（每个会话一个实例）
 _career_agents = {}
+_session_chat_locks: dict[str, asyncio.Lock] = {}
+
+_PROFILE_ENRICHMENT_MARKERS = (
+    "简历", "求职", "岗位", "职位", "实习", "工作", "项目", "经历", "负责",
+    "专业", "学校", "学历", "薪资", "期望", "城市", "技能", "熟悉", "使用过",
+    "开发", "后端", "前端", "产品", "运营", "设计", "面试", "投递",
+)
+
+
+def _get_session_chat_lock(session_id: str) -> asyncio.Lock:
+    lock = _session_chat_locks.get(session_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _session_chat_locks[session_id] = lock
+    return lock
 
 
 def _build_resume_chat_hint(resume_update: dict, include_question: bool = True) -> str:
     changes = resume_update.get("changes") or []
-    preview = resume_update.get("latest_preview")
     questions = resume_update.get("next_questions") or []
-    conflicts = resume_update.get("conflicts") or []
-
-    if conflicts:
-        return conflicts[0].get("message", "")
 
     if not changes:
         return ""
 
-    parts = []
-    if preview and preview.get("content"):
-        parts.append(f"我先把这段记成简历话术：{preview['content']}")
     if questions and include_question:
-        parts.append(f"接下来我想确认一个点：{questions[0]}")
+        return questions[0]
 
-    return "\n\n".join(parts)
+    return ""
 
 
-def _remove_existing_questions(text: str) -> str:
-    cleaned = re.sub(r"[^。！？!?\n]*[？?]", "", text)
-    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+def _contains_question(text: str) -> bool:
+    return "？" in text or "?" in text
+
+
+def _strip_internal_tool_markers(text: str) -> str:
+    return re.sub(r"\s*\[调用工具\s*[:：][^\]]+\]\s*", "\n", text or "").strip()
+
+
+def _needs_profile_enrichment(text: str) -> bool:
+    normalized = (text or "").strip()
+    if len(normalized) < 4:
+        return False
+    return any(marker in normalized for marker in _PROFILE_ENRICHMENT_MARKERS)
 
 
 async def _get_career_agent(session_id: str):
@@ -65,7 +90,9 @@ async def _get_career_agent(session_id: str):
         # 连接 MCP（如果启用）
         if hasattr(agent, "connect_mcp") and config.USE_MCP:
             try:
-                await agent.connect_mcp()
+                await asyncio.wait_for(agent.connect_mcp(), timeout=7)
+            except asyncio.TimeoutError:
+                logger.warning("MCP connection timed out for session %s; continuing without tools", session_id)
             except Exception as e:
                 logger.warning(f"Failed to connect MCP for session {session_id}: {e}")
         
@@ -82,6 +109,8 @@ async def chat_stream(session_id: str, request: Request):
     优先使用 CareerAgent（Phase 3），带有完整的 LangChain 记忆系统
     支持智能断句，自动创建多个气泡
     """
+    chat_lock: asyncio.Lock | None = None
+    lock_acquired = False
     try:
         logger.info(f"收到聊天请求: session_id={session_id}")
         
@@ -103,6 +132,12 @@ async def chat_stream(session_id: str, request: Request):
             logger.warning(f"会话不存在: {session_id}")
             raise SessionNotFoundException(session_id)
         
+        chat_lock = _get_session_chat_lock(session_id)
+        if chat_lock.locked():
+            raise HTTPException(status_code=409, detail="上一条消息仍在处理中，请稍候")
+        await chat_lock.acquire()
+        lock_acquired = True
+
         logger.info(f"保存用户消息到数据库")
         save_message(session_id, "user", user_message.strip())
         recent_messages = get_messages(session_id, limit=20)
@@ -112,18 +147,57 @@ async def chat_stream(session_id: str, request: Request):
 
         emotion_guard = EmotionGuard()
         emotion_assessment = emotion_guard.assess(session_id, user_message.strip())
-        resume_update = await ResumeBuilderService().update_from_user_message_async(session_id, user_message.strip())
-        tracking_update = await update_career_tracking(
+        resume_pdf_requested = is_resume_pdf_request(user_message)
+        resume_service = ResumeBuilderService()
+        if resume_pdf_requested:
+            resume_update = resume_service.update_from_user_message(session_id, user_message.strip())
+            tracking_update = {
+                "session_id": session_id,
+                "updated": False,
+                "follow_up": None,
+            }
+        elif _needs_profile_enrichment(user_message):
+            try:
+                resume_update = await asyncio.wait_for(
+                    resume_service.update_from_user_message_async(session_id, user_message.strip()),
+                    timeout=13,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Resume enrichment timed out for session %s; using local extraction", session_id)
+                resume_update = resume_service.update_from_user_message(session_id, user_message.strip())
+            try:
+                tracking_update = await asyncio.wait_for(
+                    update_career_tracking(
+                        session_id,
+                        user_message.strip(),
+                        resume_update,
+                        allow_follow_up=not emotion_assessment.should_intervene,
+                    ),
+                    timeout=13,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Career tracking enrichment timed out for session %s", session_id)
+                tracking_update = {
+                    "session_id": session_id,
+                    "updated": False,
+                    "follow_up": None,
+                }
+        else:
+            resume_update = resume_service.update_from_user_message(session_id, user_message.strip())
+            tracking_update = {
+                "session_id": session_id,
+                "updated": False,
+                "follow_up": None,
+            }
+        job_match_action = build_job_match_action(
             session_id,
-            user_message.strip(),
-            resume_update,
-            allow_follow_up=not emotion_assessment.should_intervene,
+            allow_action=not emotion_assessment.should_intervene,
         )
         pdf_snapshot = snapshot_resume_pdfs()
         
         # 获取 CareerAgent 实例（优先使用）
         agent = None
-        if not emotion_assessment.should_intervene:
+        if not emotion_assessment.should_intervene and not resume_pdf_requested:
             agent = await _get_career_agent(session_id)
         
         logger.info("开始调用 Agent 生成回复")
@@ -151,17 +225,44 @@ async def chat_stream(session_id: str, request: Request):
                     full_ai_response.append(
                         emotion_guard.build_support_response(emotion_assessment, user_message)
                     )
+                elif resume_pdf_requested:
+                    logger.info("Explicit PDF resume request detected; invoking resume_skill via MCP")
+                    try:
+                        resume_state = resume_update.get("state") or ResumeBuilderService().load_state(session_id)
+                        payload = build_resume_skill_payload(
+                            resume_state,
+                            get_skill_evidence_chains(session_id),
+                        )
+                        validation = validate_resume_payload(payload)
+                        if not validation["complete"]:
+                            full_ai_response.append(build_incomplete_resume_response(validation))
+                        else:
+                            result = await call_resume_skill(payload)
+                            filename = result.get("pdf_path", "").replace("\\", "/").rsplit("/", 1)[-1]
+                            full_ai_response.append(
+                                f"好，信息已经完整了，我把 PDF 简历生成好了。{filename or 'PDF 简历'}会在右侧打开，你也可以从左侧简历记录里再次查看或下载。"
+                            )
+                    except Exception as exc:
+                        logger.error("Explicit resume PDF generation failed: %s", exc, exc_info=True)
+                        full_ai_response.append(
+                            "这次 PDF 没有生成成功，MCP 的简历工具连接出了问题。我已经保留了当前简历信息，请稍后重试，不需要重新讲一遍。"
+                        )
                 elif hasattr(agent, "stream_chat"):
                     # CareerAgent - 使用完整的 LangChain 记忆系统
                     logger.info("使用 CareerAgent (带有 LangChain 记忆系统)")
                     
-                    async for token in agent.stream_chat(user_message):
-                        # 检查是否是断句信号（跳过）
-                        if token == "__FRAGMENT_BREAK__":
-                            continue
-                        else:
-                            # 只收集内容，不发送流式输出
-                            full_ai_response.append(token)
+                    async def collect_agent_response():
+                        async for token in agent.stream_chat(user_message):
+                            if token != "__FRAGMENT_BREAK__":
+                                full_ai_response.append(token)
+
+                    try:
+                        await asyncio.wait_for(collect_agent_response(), timeout=50)
+                    except asyncio.TimeoutError:
+                        logger.error("CareerAgent response timed out for session %s", session_id)
+                        full_ai_response.append(
+                            "这次模型回复等待太久，已经先停下来了。你可以再发一次，我会接着当前对话继续。"
+                        )
                     
                 else:
                     # SimpleAgent 回退
@@ -188,12 +289,13 @@ async def chat_stream(session_id: str, request: Request):
                             # 不发送事件，只收集内容
 
                 skill_follow_up = tracking_update.get("follow_up")
-                resume_hint = _build_resume_chat_hint(resume_update, include_question=not skill_follow_up)
-                if resume_hint and not emotion_assessment.should_intervene:
-                    full_ai_response.append(f"\n\n{resume_hint}")
-                if skill_follow_up and not emotion_assessment.should_intervene:
-                    response_without_questions = _remove_existing_questions("".join(full_ai_response))
-                    full_ai_response[:] = [response_without_questions] if response_without_questions else []
+                agent_text = "".join(full_ai_response)
+                if (
+                    skill_follow_up
+                    and not _contains_question(agent_text)
+                    and not emotion_assessment.should_intervene
+                    and not resume_pdf_requested
+                ):
                     full_ai_response.append(f"\n\n{skill_follow_up['question']}")
                 
                 # 发送"对方正在输入结束"信号
@@ -201,7 +303,7 @@ async def chat_stream(session_id: str, request: Request):
                 
                 # 对回复进行碎片化处理
                 if full_ai_response:
-                    full_text = "".join(full_ai_response)
+                    full_text = _strip_internal_tool_markers("".join(full_ai_response))
                     logger.info(f"AI回复完成: {len(full_text)} 字符，开始碎片化处理")
                     
                     # 使用碎片化器处理文本（每次创建新实例确保加载最新代码）
@@ -240,7 +342,10 @@ async def chat_stream(session_id: str, request: Request):
                     
                     # 保存原始回复到数据库（不含语气词）
                     logger.info(f"保存 AI 回复到数据库: {len(full_text)} 字符")
-                    save_message(session_id, "ai", full_text)
+                    message_actions = [job_match_action] if job_match_action else []
+                    saved_message_id = save_message(session_id, "ai", full_text, actions=message_actions)
+                    if job_match_action:
+                        yield f"data: {json.dumps({'type': 'assistant_action', 'message_id': str(saved_message_id), 'data': job_match_action}, ensure_ascii=False)}\n\n"
 
                 generated_pdf = find_new_resume_pdf(pdf_snapshot)
                 if generated_pdf:
@@ -260,7 +365,12 @@ async def chat_stream(session_id: str, request: Request):
                 
             except Exception as e:
                 logger.error(f"事件生成器错误: {str(e)}", exc_info=True)
-                yield f"data: {json.dumps({'type': 'error', 'message': '处理请求时发生错误'})}\n\n"
+                yield f"data: {json.dumps({'type': 'typing_end'})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': '这次回复没有处理成功，请再试一次。'}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            finally:
+                if lock_acquired and chat_lock.locked():
+                    chat_lock.release()
         
         logger.info("返回 StreamingResponse")
         return StreamingResponse(
@@ -274,12 +384,20 @@ async def chat_stream(session_id: str, request: Request):
         )
         
     except SessionNotFoundException as e:
+        if lock_acquired and chat_lock and chat_lock.locked():
+            chat_lock.release()
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except LLMServiceException as e:
+        if lock_acquired and chat_lock and chat_lock.locked():
+            chat_lock.release()
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except HTTPException:
+        if lock_acquired and chat_lock and chat_lock.locked():
+            chat_lock.release()
         raise
     except Exception as e:
+        if lock_acquired and chat_lock and chat_lock.locked():
+            chat_lock.release()
         logger.error(f"聊天接口错误: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
 

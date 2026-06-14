@@ -1,0 +1,56 @@
+{
+  "format": "chinese",
+  "contact": {
+    "name": "未填写姓名",
+    "title": "效率",
+    "location": "",
+    "phone": "",
+    "email": ""
+  },
+  "summary": "记录了新的对话线索",
+  "sections": [
+    {
+      "title": "经历亮点",
+      "items": [
+        {
+          "heading": "核心经历",
+          "bullets": [
+            "我上个学期做过一个校园二手书交易平台"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "项目经历",
+      "items": [
+        {
+          "heading": "代表项目",
+          "bullets": [
+            "用户在项目中补充了MySQL相关功能。",
+            "参与项目工作，负责需求拆解、执行推进与结果复盘。",
+            "用Spring Boot + MongoDB开发商城后端",
+            "用Spring Boot写过一个商城后端",
+            "基于Swing和MySQL开发校园二手书交易平台，实现图书信息展示、用户管理及交易等模块"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "技能清单",
+      "items": [
+        {
+          "heading": "核心技能",
+          "bullets": [
+            "Java",
+            "SQL",
+            "Swing",
+            "MySQL",
+            "Spring Boot",
+            "Go",
+            "MongoDB"
+          ]
+        }
+      ]
+    }
+  ]
+}

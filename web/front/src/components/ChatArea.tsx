@@ -16,8 +16,10 @@ export function ChatArea() {
   const resumePanelOpen = useChatStore((s) => s.resumePanelOpen)
   const setResumePanelOpen = useChatStore((s) => s.setResumePanelOpen)
   const { sendMessage } = useSSEChat(sessionId)
+  const isStreaming = useChatStore((s) => s.isStreaming)
   const creatingRef = useRef<Promise<string | null> | null>(null)
   const restoredSessionRef = useRef<string | null>(null)
+  const newSessionRef = useRef<string | null>(null)
 
   const createSession = useCallback(async () => {
     if (creatingRef.current) return creatingRef.current
@@ -35,7 +37,6 @@ export function ChatArea() {
       })
       .then((data) => {
         const nextSessionId = data.session_id as string
-        setSessionId(nextSessionId)
         return nextSessionId
       })
       .catch((err) => {
@@ -47,17 +48,30 @@ export function ChatArea() {
       })
 
     return creatingRef.current
-  }, [setSessionId])
+  }, [])
 
   const handleSend = useCallback(async (content: string) => {
     const message = content.trim()
-    if (!message) return
+    if (!message || isStreaming) return
 
+    const isNewSession = !sessionId
     const activeSessionId = sessionId || await createSession()
     if (!activeSessionId) return
 
-    sendMessage(message, activeSessionId)
-  }, [sessionId, createSession, sendMessage])
+    if (isNewSession) {
+      // Start the optimistic message and network request before publishing the
+      // new session id. Session-dependent effects can therefore never run
+      // ahead of the first outgoing message.
+      restoredSessionRef.current = activeSessionId
+      newSessionRef.current = activeSessionId
+      const pendingSend = sendMessage(message, activeSessionId)
+      setSessionId(activeSessionId)
+      await pendingSend
+      return
+    }
+
+    await sendMessage(message, activeSessionId)
+  }, [sessionId, createSession, sendMessage, isStreaming, setSessionId])
 
   // Listen for send-message events from welcome page suggestions
   useEffect(() => {
@@ -94,11 +108,15 @@ export function ChatArea() {
       })
       .then((data) => {
         if (!data) return
+        const current = useChatStore.getState()
+        const activeSessionId = useSessionStore.getState().sessionId
+        if (activeSessionId !== sessionId || current.isStreaming) return
         hydrateMessages(
-          data.messages.map((message: { id: string; role: "user" | "ai"; content: string; created_at: string }) => ({
+          data.messages.map((message: { id: string; role: "user" | "ai"; content: string; actions?: import("../stores/chatStore").AssistantAction[]; created_at: string }) => ({
             id: message.id,
             role: message.role,
             content: message.content,
+            actions: message.actions || [],
             timestamp: new Date(message.created_at).getTime() || Date.now(),
           }))
         )
@@ -110,6 +128,11 @@ export function ChatArea() {
 
   useEffect(() => {
     if (!sessionId) return
+
+    if (newSessionRef.current === sessionId) {
+      newSessionRef.current = null
+      return
+    }
 
     setResumePdf(null)
     fetch(`/api/resume/${sessionId}/pdf`)

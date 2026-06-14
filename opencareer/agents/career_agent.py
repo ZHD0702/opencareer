@@ -20,6 +20,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
+import httpx
 
 from opencareer.prompts.career import get_system_prompt, get_extraction_prompt
 
@@ -37,6 +38,20 @@ def _sanitize_text(text: str) -> str:
     if not text:
         return text
     return text.encode("utf-8", errors="ignore").decode("utf-8")
+
+
+def _local_http_client_factory(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    """Keep local MCP traffic out of system HTTP proxies."""
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        trust_env=False,
+    )
 
 
 class CareerAgent:
@@ -76,6 +91,8 @@ class CareerAgent:
             model="deepseek-chat",
             api_key=self.api_key,
             base_url="https://api.deepseek.com",
+            timeout=35,
+            max_retries=1,
         )
 
         # 用于信息提取的LLM（temperature更低以获得更准确的提取）
@@ -84,6 +101,8 @@ class CareerAgent:
             model="deepseek-chat",
             api_key=self.api_key,
             base_url="https://api.deepseek.com",
+            timeout=20,
+            max_retries=1,
         )
 
         # 创建信息提取的提示模板
@@ -145,12 +164,17 @@ class CareerAgent:
             self._mcp_client = MultiServerMCPClient({
                 "opencareer": {
                     "transport": "streamable_http",
-                    "url": self.mcp_url,
+                    "url": self.mcp_url.replace("http://localhost:", "http://127.0.0.1:"),
+                    "httpx_client_factory": _local_http_client_factory,
+                    "terminate_on_close": False,
                 }
             })
 
             # Load all tools from the MCP server
-            self._tools = await self._mcp_client.get_tools()
+            self._tools = await asyncio.wait_for(
+                self._mcp_client.get_tools(),
+                timeout=6,
+            )
             logger.info(f"Loaded {len(self._tools)} tools from MCP server: "
                         f"{[t.name for t in self._tools]}")
 
@@ -190,12 +214,15 @@ class CareerAgent:
         else:
             llm_with_tools = self.llm
 
-        response = await llm_with_tools.ainvoke(messages)
+        response = await asyncio.wait_for(llm_with_tools.ainvoke(messages), timeout=45)
 
         # Handle tool calls
         if response.tool_calls:
             # Execute tool calls
-            tool_results = await self._execute_tool_calls(response.tool_calls)
+            tool_results = await asyncio.wait_for(
+                self._execute_tool_calls(response.tool_calls),
+                timeout=30,
+            )
 
             # Check for markdown_skill results with direct output
             direct_outputs = []
@@ -218,7 +245,10 @@ class CareerAgent:
                 for tr in tool_results:
                     messages.append(tr)
 
-                final_response = await llm_with_tools.ainvoke(messages)
+                final_response = await asyncio.wait_for(
+                    llm_with_tools.ainvoke(messages),
+                    timeout=45,
+                )
                 response_text = final_response.content
         else:
             response_text = response.content
@@ -230,7 +260,7 @@ class CareerAgent:
         self.message_history.add_ai_message(response_text)
 
         # Update long-term memory
-        self._update_memory(user_input, response_text)
+        self._schedule_memory_update(user_input, response_text)
 
         return response_text
 
@@ -251,13 +281,15 @@ class CareerAgent:
         else:
             llm_with_tools = self.llm
 
-        response = await llm_with_tools.ainvoke(messages)
+        response = await asyncio.wait_for(llm_with_tools.ainvoke(messages), timeout=45)
+        response_text = ""
 
         # Handle tool calls
         if response.tool_calls:
-            yield f"\n[调用工具: {', '.join(tc['name'] for tc in response.tool_calls)}]\n"
-
-            tool_results = await self._execute_tool_calls(response.tool_calls)
+            tool_results = await asyncio.wait_for(
+                self._execute_tool_calls(response.tool_calls),
+                timeout=30,
+            )
 
             # Check for markdown_skill results with direct output
             direct_outputs = []
@@ -283,7 +315,9 @@ class CareerAgent:
                 # Stream final response
                 async for chunk in llm_with_tools.astream(messages):
                     if chunk.content:
-                        yield _sanitize_text(chunk.content)
+                        content = _sanitize_text(chunk.content)
+                        response_text += content
+                        yield content
         else:
             response_text = response.content or ""
             # For non-streaming initial response, yield all at once
@@ -291,11 +325,11 @@ class CareerAgent:
 
         # Store in history
         self.message_history.add_user_message(user_input)
-        cleaned_content = _sanitize_text(response.content or "")
+        cleaned_content = _sanitize_text(response_text)
         if cleaned_content:
             self.message_history.add_ai_message(cleaned_content)
 
-        self._update_memory(user_input, cleaned_content)
+        self._schedule_memory_update(user_input, cleaned_content)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -466,6 +500,21 @@ class CareerAgent:
         self._extract_important_info(user_input, response)
 
         self._save_memory()
+
+    async def _update_memory_in_background(self, user_input: str, response: str) -> None:
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(self._update_memory, user_input, response),
+                timeout=15,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Memory extraction timed out; chat response was not affected")
+        except Exception as exc:
+            logger.warning("Background memory update failed: %s", exc)
+
+    def _schedule_memory_update(self, user_input: str, response: str) -> None:
+        task = asyncio.create_task(self._update_memory_in_background(user_input, response))
+        task.add_done_callback(lambda finished: finished.exception() if not finished.cancelled() else None)
 
     def get_memory_summary(self) -> Dict[str, int]:
         return {

@@ -1,0 +1,49 @@
+{
+  "format": "chinese",
+  "contact": {
+    "name": "小明",
+    "title": "Java后端实习",
+    "location": "南京",
+    "phone": "11111111111",
+    "email": "xiaoming@163.com"
+  },
+  "summary": "小明，面向Java后端实习，可围绕事实、结果和证据组织投递内容。",
+  "sections": [
+    {
+      "title": "教育背景",
+      "items": [
+        {
+          "heading": "南京信息工程大学 软件工程 大三",
+          "bullets": []
+        }
+      ]
+    },
+    {
+      "title": "项目经历",
+      "items": [
+        {
+          "heading": "代表项目",
+          "bullets": [
+            "校园二手书交易平台（Spring Boot + MyBatis + MySQL）\n- 负责数据库设计：设计用户表、商品表、订单表等核心表结构，建立表间关联关系\n- 开发用户注册登录、书籍发布、订单创建等RESTful接口\n- 使用Swagger编写接口文档，实现参数校验与全局异常处理"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "技能清单",
+      "items": [
+        {
+          "heading": "核心技能",
+          "bullets": [
+            "Java",
+            "Spring Boot",
+            "MyBatis",
+            "MySQL",
+            "Swagger",
+            "Postman"
+          ]
+        }
+      ]
+    }
+  ]
+}

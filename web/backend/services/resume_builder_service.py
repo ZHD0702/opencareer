@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import json
 from copy import deepcopy
@@ -12,6 +13,8 @@ from db.crud import get_resume_state, save_resume_state
 DEFAULT_RESUME_STATE: dict[str, Any] = {
     "basics": {
         "name": None,
+        "phone": None,
+        "email": None,
         "grade_level": None,
         "major": None,
         "school": None,
@@ -64,15 +67,6 @@ class ResumeBuilderService:
     SALARY_PATTERN = re.compile(r"(\d+(?:\.\d+)?\s*[kK万]?\s*[-~到至]\s*\d+(?:\.\d+)?\s*[kK万]?|\d+\s*[kK万]\+?)")
     CITY_PATTERN = re.compile(r"(北京|上海|广州|深圳|杭州|成都|南京|武汉|西安|苏州|天津|重庆|厦门|长沙|郑州|青岛)")
     NUMBER_PATTERN = re.compile(r"(\d+(?:\.\d+)?)(?:\s*)(人天|人|个|次|%|％|万|k|K|天|周|月|年)?")
-
-    FUZZY_TRIGGERS = {
-        "招聘": "你负责的招聘一年大概完成了多少人？有没有关键岗位或平均到岗周期？",
-        "提升效率": "这个效率大概提升了多少？如果没有精确数字，是节省时间、人力，还是缩短流程？",
-        "优化流程": "优化前后最大的变化是什么？能用周期、成本或错误率描述一下吗？",
-        "负责项目": "这个项目当时的目标是什么？你具体负责哪一块，最后结果怎么样？",
-        "做过项目": "这个项目可以按背景、动作、结果拆一下吗？你最关键的贡献是什么？",
-        "管理": "你管理的是人、流程、供应商还是项目？规模大概多大？",
-    }
 
     INDUSTRY_KEYWORDS = {
         "internet": {
@@ -197,6 +191,12 @@ class ResumeBuilderService:
         if match := re.search(r"(?:我叫|姓名是|名字叫)\s*([\u4e00-\u9fffA-Za-z]{2,12})", text):
             basics["name"] = match.group(1)
             changes.append("更新姓名")
+        if match := re.search(r"(?<!\d)(1[3-9]\d{9})(?!\d)", text):
+            basics["phone"] = match.group(1)
+            changes.append("更新手机号")
+        if match := re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text):
+            basics["email"] = match.group(0)
+            changes.append("更新邮箱")
         for grade in ("大一", "大二", "大三", "大四", "研一", "研二", "研三", "应届"):
             if grade in text:
                 basics["grade_level"] = grade
@@ -307,9 +307,12 @@ class ResumeBuilderService:
             from llm.registry import get_llm_adapter
 
             llm = get_llm_adapter()
-            response = await llm.invoke(
-                [{"role": "user", "content": self._build_llm_user_prompt(text, state)}],
-                self._build_llm_system_prompt(),
+            response = await asyncio.wait_for(
+                llm.invoke(
+                    [{"role": "user", "content": self._build_llm_user_prompt(text, state)}],
+                    self._build_llm_system_prompt(),
+                ),
+                timeout=12,
             )
             return self._parse_llm_json(response)
         except Exception:
@@ -536,44 +539,21 @@ class ResumeBuilderService:
         return mapping.get(value, value)
 
     def _plan_questions(self, text: str, state: dict[str, Any], llm_result: dict[str, Any] | None = None) -> None:
-        questions: list[str] = []
-        basics = state["basics"]
-        target = state["target"]
-
-        if llm_result:
-            questions.extend([
-                question for question in llm_result.get("follow_up_questions", [])
-                if question
-            ])
-
-        if not target.get("role"):
-            questions.append("你这次主要想投什么岗位？")
-        if not target.get("salary_expectation"):
-            questions.append("薪资预期大概在哪个范围？")
-        if state["experiences"]:
-            latest = state["experiences"][0]
-            if not latest["metrics"]:
-                for trigger, question in self.FUZZY_TRIGGERS.items():
-                    if trigger in text:
-                        questions.append(question)
-                        break
-                else:
-                    questions.append("这段经历最后有没有能量化的结果，比如人数、周期、效率、成本或转化率？")
-        elif target.get("role") and basics.get("grade_level"):
-            questions.append("你最近最能代表这个方向的一段项目、实习或工作经历是什么？")
-        if not state["preferences"].get("pressure_response"):
-            questions.append("遇到多个 deadline 撞在一起时，你更像哪种：先拆优先级、沟通资源、自己扛，还是容易焦虑需要别人帮忙理顺？")
-
-        state["unresolved_questions"] = self._unique(questions)[:3]
+        questions = (llm_result or {}).get("follow_up_questions") or []
+        state["unresolved_questions"] = self._unique([
+            str(question).strip()
+            for question in questions
+            if str(question).strip()
+        ])[:3]
 
     def _detect_conflicts(self, state: dict[str, Any]) -> None:
-        conflicts: list[dict[str, str]] = []
+        conflicts: list[dict[str, Any]] = []
         grade = state["basics"].get("grade_level")
         has_full_time = any(exp.get("type") == "work" for exp in state["experiences"])
         if grade in {"大一", "大二", "大三", "大四", "应届"} and has_full_time:
             conflicts.append({
                 "type": "education_work_overlap",
-                "message": "你看起来还是学生身份，但经历里出现了全职工作。它是实习、兼职，还是正式工作？",
+                "fields": ["grade_level", "experience_type"],
             })
         state["conflicts"] = conflicts
 

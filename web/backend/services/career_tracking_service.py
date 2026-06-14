@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
 
 from db.crud import (
+    discard_skill_evidence_item,
     get_pending_skill_follow_up,
     list_job_applications,
     list_skill_evidence_items,
@@ -33,14 +35,17 @@ SKILL_CATALOG = {
     "抗压": "软技能", "协作": "软技能", "领导力": "软技能",
 }
 
-FIELD_PRIORITY = ("result", "action", "scenario", "metric", "user_role")
-FIELD_QUESTIONS = {
-    "scenario": "你当时是在什么项目或工作场景里用到 {skill} 的？",
-    "action": "这件事里你具体用 {skill} 做了什么？尽量说说你的实际动作。",
-    "result": "做完之后带来了什么变化？没有精确数字，说大致效果也可以。",
-    "metric": "这个结果大概能用什么数字或范围来说明？没有精确统计也没关系。",
-    "user_role": "这部分主要是你独立负责、协作完成，还是由你主导的？",
-}
+FIELD_PRIORITY = ("scenario", "action", "result", "metric", "user_role")
+
+TARGET_INTENT_PATTERN = re.compile(
+    r"(?:^|[，。！？\s])(?:我)?(?:想|希望|打算|准备|目标是|目标岗位是|求职方向是)"
+    r".{0,28}(?:后端|前端|开发|工程师|产品|运营|设计|岗位|方向)",
+    re.IGNORECASE,
+)
+EVIDENCE_MARKERS = (
+    "会", "熟悉", "掌握", "使用过", "用过", "做过", "开发过", "负责", "参与",
+    "主导", "项目", "实习", "工作中", "搭建", "实现", "优化",
+)
 
 
 async def update_career_tracking(
@@ -91,9 +96,13 @@ async def _extract_skill_evidence(
     resume_update: dict[str, Any],
     allow_follow_up: bool,
 ) -> dict[str, Any]:
+    _prune_target_only_evidence(session_id)
     pending = get_pending_skill_follow_up(session_id)
+    if not pending and _is_target_intent_only(message):
+        return {"skills_updated": 0, "evidence_updated": 0, "follow_up": None}
     extracted = await _run_skill_extractor(message, resume_update, pending)
     evidence_items = extracted.get("evidence", []) if extracted else []
+    proposed_follow_up = str((extracted or {}).get("follow_up_question") or "").strip()
     if not evidence_items:
         evidence_items = _fallback_evidence(message, resume_update, pending)
 
@@ -123,7 +132,12 @@ async def _extract_skill_evidence(
 
     follow_up = None
     if allow_follow_up and updated_ids:
-        follow_up = _choose_follow_up(session_id, updated_ids, pending if pending_answered else None)
+        follow_up = _choose_follow_up(
+            session_id,
+            updated_ids,
+            pending if pending_answered else None,
+            proposed_follow_up,
+        )
 
     return {
         "skills_updated": len(touched_skills),
@@ -165,13 +179,21 @@ async def _run_skill_extractor(
     "user_role": null,
     "used_at": null,
     "confidence": 0.0
-  }}]
+  }}],
+  "follow_up_question": null
 }}
-不要编造数字或职责。仅提到技能名称时保留空字段。没有技能信息时返回空数组。
+不要编造数字或职责。用户只是在表达目标岗位或求职方向（例如“我想做 Java 后端”）时，
+不属于技能证据，必须返回空数组。只有用户明确表示会、熟悉、用过或描述了项目实践时才抽取证据。
+没有技能实践信息时返回空数组。
+只有当前证据确实缺少一项影响判断的关键信息时，才生成一个贴合上下文的 follow_up_question。
+不要使用固定模板，不要泛泛夸奖，不要重复已经问过的问题，一次只问一个问题。
 """
-        response = await get_llm_adapter().invoke(
-            [{"role": "user", "content": prompt}],
-            "你是 OpenCareer 的技能证据抽取器，只返回合法 JSON。",
+        response = await asyncio.wait_for(
+            get_llm_adapter().invoke(
+                [{"role": "user", "content": prompt}],
+                "你是 OpenCareer 的技能证据抽取器，只返回合法 JSON。",
+            ),
+            timeout=12,
         )
         try:
             return json.loads(response)
@@ -214,6 +236,24 @@ def _fallback_evidence(
     } for skill in found]
 
 
+def _is_target_intent_only(message: str) -> bool:
+    text = (message or "").strip()
+    return bool(TARGET_INTENT_PATTERN.search(text)) and not any(marker in text for marker in EVIDENCE_MARKERS)
+
+
+def _is_empty_target_evidence(item: dict[str, Any]) -> bool:
+    has_fact = any(item.get(field) for field in ("scenario", "task", "action", "result", "metric", "user_role", "used_at"))
+    return not has_fact and _is_target_intent_only(str(item.get("raw_text") or ""))
+
+
+def _prune_target_only_evidence(session_id: str) -> int:
+    removed = 0
+    for item in list_skill_evidence_items(session_id):
+        if _is_empty_target_evidence(item) and discard_skill_evidence_item(session_id, item["id"]):
+            removed += 1
+    return removed
+
+
 def _normalize_skill_name(value: Any) -> str | None:
     name = str(value or "").strip()
     if not name or len(name) > 40:
@@ -238,6 +278,7 @@ def _evidence_level(item: dict[str, Any]) -> tuple[str, int]:
 
 
 def get_skill_evidence_chains(session_id: str) -> dict[str, list[dict[str, Any]]]:
+    _prune_target_only_evidence(session_id)
     chains: dict[str, list[dict[str, Any]]] = {}
     for raw_item in list_skill_evidence_items(session_id):
         item = dict(raw_item)
@@ -256,14 +297,12 @@ def _refresh_skill_profile(session_id: str, skill_name: str) -> None:
     level, _ = _evidence_level(best)
     status = "proven" if level in {"proven", "strong"} else "mentioned"
     evidence = "；".join(filter(None, (best.get("scenario"), best.get("action"), best.get("result"), best.get("metric"))))
-    missing = next((field for field in FIELD_PRIORITY if not best.get(field)), None)
-    suggestion = FIELD_QUESTIONS[missing].format(skill=skill_name) if missing else None
     upsert_skill_evidence(session_id, {
         "skill_name": skill_name,
         "status": status,
         "category": SKILL_CATALOG.get(skill_name, "专业能力"),
         "evidence": evidence or best.get("raw_text"),
-        "suggestion": suggestion,
+        "suggestion": None,
         "source": "evidence_chain",
     })
 
@@ -272,6 +311,7 @@ def _choose_follow_up(
     session_id: str,
     evidence_ids: list[int],
     previous: dict[str, Any] | None,
+    proposed_question: str,
 ) -> dict[str, Any] | None:
     items = [item for item in list_skill_evidence_items(session_id) if item["id"] in evidence_ids]
     candidates = []
@@ -285,7 +325,9 @@ def _choose_follow_up(
     asked_count = int((previous or {}).get("asked_count") or 0) + (1 if previous else 0)
     if previous and previous.get("evidence_id") == item["id"] and asked_count >= 2:
         return None
-    question = FIELD_QUESTIONS[missing].format(skill=item["skill_name"])
+    question = proposed_question.strip().strip('"“”')
+    if not question or len(question) > 120 or not any(mark in question for mark in ("？", "?")):
+        return None
     return save_skill_follow_up(session_id, {
         "evidence_id": item["id"],
         "skill_name": item["skill_name"],

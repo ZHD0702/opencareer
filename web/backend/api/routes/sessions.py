@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime
 import uuid
 import logging
+import re
 
 from api.schemas import CreateSessionRequest, SessionResponse
 from api.exceptions import SessionNotFoundException
@@ -9,6 +10,10 @@ from db.crud import create_session, delete_session, get_messages, get_session, l
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _clean_session_preview(content: str) -> str:
+    return re.sub(r"\s*\[调用工具\s*[:：][^\]]+\]\s*", " ", content or "").strip()
 
 
 @router.get("/sessions")
@@ -37,7 +42,7 @@ async def list_user_sessions(user_id: str = "default_user", limit: int = 100):
                 "session_id": session["session_id"],
                 "user_id": session["user_id"],
                 "title": session.get("title") or fallback_title,
-                "preview": latest["content"][:80] if latest else "",
+                "preview": _clean_session_preview(latest["content"])[:80] if latest else "",
                 "turn_count": turn_count,
                 "current_agent": session.get("current_phase"),
                 "created_at": session.get("updated_at") or session.get("created_at"),
@@ -139,6 +144,7 @@ async def get_session_messages(session_id: str, limit: int = 200):
                     "id": str(message["id"]),
                     "role": "ai" if message["role"] == "ai" else "user",
                     "content": message["content"],
+                    "actions": message.get("actions") or [],
                     "created_at": message["created_at"],
                 }
                 for message in messages

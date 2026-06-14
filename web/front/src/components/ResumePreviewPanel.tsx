@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { motion } from "framer-motion"
 import { Download, FileText, RefreshCw, X } from "lucide-react"
 import { useChatStore } from "../stores/chatStore"
@@ -7,11 +7,39 @@ export function ResumePreviewPanel() {
   const document = useChatStore((s) => s.resumePdf)
   const setResumePanelOpen = useChatStore((s) => s.setResumePanelOpen)
   const [reloadKey, setReloadKey] = useState(0)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewError, setPreviewError] = useState("")
+
+  useEffect(() => {
+    if (!document) return
+
+    const controller = new AbortController()
+    let objectUrl = ""
+    setPreviewUrl(null)
+    setPreviewError("")
+
+    fetch(document.preview_url, { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("简历预览加载失败")
+        return response.blob()
+      })
+      .then((blob) => {
+        if (controller.signal.aborted) return
+        objectUrl = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }))
+        setPreviewUrl(objectUrl)
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return
+        setPreviewError(error instanceof Error ? error.message : "简历预览加载失败")
+      })
+
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [document, reloadKey])
 
   if (!document) return null
-
-  const separator = document.preview_url.includes("?") ? "&" : "?"
-  const previewUrl = `${document.preview_url}${separator}reload=${reloadKey}`
 
   return (
     <motion.aside
@@ -45,6 +73,7 @@ export function ResumePreviewPanel() {
             </button>
             <a
               href={document.download_url}
+              download={document.filename}
               className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title="下载 PDF"
             >
@@ -62,12 +91,18 @@ export function ResumePreviewPanel() {
         </div>
 
         <div className="min-h-0 flex-1 bg-muted/35 p-2">
-          <iframe
-            key={previewUrl}
-            src={previewUrl}
-            title={`${document.filename} 预览`}
-            className="h-full w-full border-0 bg-white"
-          />
+          {previewUrl ? (
+            <iframe
+              key={previewUrl}
+              src={previewUrl}
+              title={`${document.filename} 预览`}
+              className="h-full w-full border-0 bg-white"
+            />
+          ) : (
+            <div className="grid h-full place-items-center text-sm text-muted-foreground">
+              {previewError || "正在加载简历预览"}
+            </div>
+          )}
         </div>
       </div>
     </motion.aside>

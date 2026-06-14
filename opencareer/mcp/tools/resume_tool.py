@@ -367,6 +367,28 @@ def _export_pdf(resume: dict[str, Any], output_pdf_path: str) -> str:
             pass
 
 
+def _missing_required_fields(
+    name: str,
+    target_role: str,
+    phone: str,
+    email: str,
+    education: str,
+    experiences: list[str],
+    projects: list[str],
+    skills: list[str],
+) -> list[str]:
+    required = [
+        ("姓名", _clean_text(name)),
+        ("手机号", _clean_text(phone)),
+        ("邮箱", _clean_text(email)),
+        ("目标岗位", _clean_text(target_role)),
+        ("教育背景", _clean_text(education)),
+        ("项目或经历", experiences or projects),
+        ("技能", skills),
+    ]
+    return [label for label, value in required if not value]
+
+
 def resume_skill(
     action: Annotated[
         Literal["generate", "optimize", "ats_check", "export_pdf"],
@@ -428,6 +450,22 @@ def resume_skill(
         if action not in {"generate", "optimize", "ats_check", "export_pdf"}:
             raise ResumeToolError("action 取值无效，请使用 generate、optimize、ats_check 或 export_pdf。")
 
+        if action in {"generate", "optimize", "export_pdf"}:
+            missing_fields = _missing_required_fields(
+                name=name,
+                target_role=target_role,
+                phone=phone,
+                email=email,
+                education=education,
+                experiences=experiences_list,
+                projects=projects_list,
+                skills=skills_list,
+            )
+            if missing_fields:
+                raise ResumeToolError(
+                    f"简历信息尚未完整，缺少：{'、'.join(missing_fields)}。请补齐后再生成 PDF。"
+                )
+
         resume = _build_resume(
             name=name,
             target_role=target_role,
@@ -463,7 +501,8 @@ def resume_skill(
         role = _clean_text(target_role) or "简历"
         from datetime import datetime
         date_str = datetime.now().strftime("%Y%m%d")
-        folder_name = f"{contact_name}-{date_str}"
+        safe_contact_name = re.sub(r'[\\/:*?"<>|]', "_", contact_name).strip(" .") or "candidate"
+        folder_name = f"{safe_contact_name}-{date_str}"
         output_folder = OUTPUT_DIR / folder_name
         output_folder.mkdir(parents=True, exist_ok=True)
 

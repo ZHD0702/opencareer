@@ -35,10 +35,15 @@ def init_sync_db():
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             intent TEXT,
+            actions_json TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (session_id) REFERENCES sessions(id)
         )
     """)
+    cursor.execute("PRAGMA table_info(messages)")
+    message_columns = {row[1] for row in cursor.fetchall()}
+    if "actions_json" not in message_columns:
+        cursor.execute("ALTER TABLE messages ADD COLUMN actions_json TEXT")
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS emotion_records (
@@ -411,7 +416,13 @@ def update_session(session_id: str, **kwargs):
     
     conn.close()
 
-def save_message(session_id: str, role: str, content: str, intent: Optional[str] = None):
+def save_message(
+    session_id: str,
+    role: str,
+    content: str,
+    intent: Optional[str] = None,
+    actions: Optional[List[Dict]] = None,
+) -> int:
     init_sync_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -419,9 +430,10 @@ def save_message(session_id: str, role: str, content: str, intent: Optional[str]
     now = datetime.utcnow().isoformat()
     
     cursor.execute("""
-        INSERT INTO messages (session_id, role, content, intent, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    """, (session_id, role, content, intent, now))
+        INSERT INTO messages (session_id, role, content, intent, actions_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (session_id, role, content, intent, json.dumps(actions or [], ensure_ascii=False), now))
+    message_id = cursor.lastrowid
 
     cursor.execute("""
         UPDATE sessions
@@ -431,6 +443,7 @@ def save_message(session_id: str, role: str, content: str, intent: Optional[str]
     
     conn.commit()
     conn.close()
+    return message_id
 
 def get_messages(session_id: str, limit: int = 50) -> List[Dict]:
     init_sync_db()
@@ -438,7 +451,7 @@ def get_messages(session_id: str, limit: int = 50) -> List[Dict]:
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT id, session_id, role, content, intent, created_at 
+        SELECT id, session_id, role, content, intent, actions_json, created_at
         FROM messages 
         WHERE session_id = ? 
         ORDER BY created_at DESC 
@@ -455,7 +468,8 @@ def get_messages(session_id: str, limit: int = 50) -> List[Dict]:
             "role": row[2],
             "content": row[3],
             "intent": row[4],
-            "created_at": row[5]
+            "actions": json.loads(row[5]) if row[5] else [],
+            "created_at": row[6]
         }
         for row in rows
     ]
@@ -696,6 +710,40 @@ def list_skill_evidence_items(session_id: str, skill_name: Optional[str] = None)
         """, (session_id,)).fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+def discard_skill_evidence_item(session_id: str, evidence_id: int) -> bool:
+    init_sync_db()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    item = conn.execute(
+        "SELECT skill_name FROM skill_evidence_items WHERE id = ? AND session_id = ?",
+        (evidence_id, session_id),
+    ).fetchone()
+    if not item:
+        conn.close()
+        return False
+    skill_name = item["skill_name"]
+    conn.execute(
+        "DELETE FROM skill_follow_ups WHERE session_id = ? AND evidence_id = ?",
+        (session_id, evidence_id),
+    )
+    conn.execute(
+        "DELETE FROM skill_evidence_items WHERE session_id = ? AND id = ?",
+        (session_id, evidence_id),
+    )
+    remaining = conn.execute(
+        "SELECT 1 FROM skill_evidence_items WHERE session_id = ? AND skill_name = ? LIMIT 1",
+        (session_id, skill_name),
+    ).fetchone()
+    if not remaining:
+        conn.execute(
+            "DELETE FROM skill_evidence WHERE session_id = ? AND skill_name = ? AND source = 'evidence_chain'",
+            (session_id, skill_name),
+        )
+    conn.commit()
+    conn.close()
+    return True
 
 
 def get_pending_skill_follow_up(session_id: str) -> Optional[Dict]:

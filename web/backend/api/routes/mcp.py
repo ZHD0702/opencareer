@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import logging
-import json
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from adapters.mcp_service import get_mcp_service, start_mcp_server
+from adapters.mcp_service import get_mcp_service
 from careers_config import config
+from services.mcp_resume_service import (
+    call_resume_skill as invoke_resume_skill,
+    load_mcp_tools,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -36,45 +39,12 @@ class ResumeSkillRequest(BaseModel):
     output_pdf_path: str = ""
 
 
-async def _ensure_mcp_available() -> None:
-    if not config.USE_MCP:
-        raise HTTPException(status_code=503, detail="MCP is disabled. Set CAREER_USE_MCP=true.")
-
-    started = await start_mcp_server()
-    if not started:
-        raise HTTPException(status_code=503, detail="MCP server is not available.")
-
-
 async def _load_mcp_tools() -> dict[str, Any]:
-    await _ensure_mcp_available()
-
     try:
-        from langchain_mcp_adapters.client import MultiServerMCPClient
-
-        client = MultiServerMCPClient(
-            {
-                "opencareer": {
-                    "transport": "streamable_http",
-                    "url": config.MCP_URL,
-                }
-            }
-        )
-        tools = await client.get_tools()
-        return {tool.name: tool for tool in tools}
+        return await load_mcp_tools()
     except Exception as exc:
         logger.error("Failed to load MCP tools: %s", exc, exc_info=True)
         raise HTTPException(status_code=503, detail=f"Failed to load MCP tools: {exc}") from exc
-
-
-def _normalize_tool_result(result: Any) -> Any:
-    if isinstance(result, list) and len(result) == 1 and isinstance(result[0], dict):
-        text = result[0].get("text")
-        if isinstance(text, str):
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return text
-    return result
 
 
 @router.get("/mcp/status")
@@ -110,17 +80,12 @@ async def list_mcp_tools():
 
 @router.post("/mcp/resume-skill")
 async def call_resume_skill(payload: ResumeSkillRequest):
-    tools = await _load_mcp_tools()
-    tool = tools.get("resume_skill")
-    if tool is None:
-        raise HTTPException(status_code=404, detail="resume_skill was not exposed by MCP.")
-
     try:
-        result = await tool.ainvoke(payload.model_dump())
+        result = await invoke_resume_skill(payload.model_dump())
         return {
             "success": True,
             "tool": "resume_skill",
-            "result": _normalize_tool_result(result),
+            "result": result,
         }
     except Exception as exc:
         logger.error("resume_skill MCP call failed: %s", exc, exc_info=True)
