@@ -69,6 +69,7 @@ async def load_mcp_tools() -> dict[str, Any]:
             last_error = exc
             logger.warning("MCP tool loading attempt %s failed: %s", attempt + 1, exc)
             if attempt == 0:
+                await start_mcp_server()
                 await asyncio.sleep(0.4)
 
     detail = _format_exception(last_error)
@@ -109,12 +110,24 @@ async def call_resume_skill(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def is_resume_pdf_request(text: str) -> bool:
+def is_resume_pdf_request(text: str, previous_assistant_text: str = "") -> bool:
     compact = re.sub(r"\s+", "", text or "").lower()
     asks_for_resume = "简历" in compact
     asks_to_generate = any(word in compact for word in ("生成", "导出", "制作", "做一份", "帮我写"))
     asks_for_pdf = "pdf" in compact or "文件" in compact
-    return asks_for_resume and asks_to_generate and asks_for_pdf
+    if asks_for_resume and asks_to_generate and asks_for_pdf:
+        return True
+
+    previous = re.sub(r"\s+", "", previous_assistant_text or "").lower()
+    assistant_offered_pdf = (
+        "简历" in previous
+        and ("pdf" in previous or "文件" in previous)
+        and any(word in previous for word in ("生成", "导出", "制作"))
+    )
+    confirmation = compact.rstrip("。！!，,") in {
+        "可以", "可以的", "好", "好的", "行", "需要", "要", "确认", "没问题",
+    } or any(phrase in compact for phrase in ("生成吧", "导出吧", "就这样生成", "直接生成"))
+    return assistant_offered_pdf and confirmation
 
 
 def build_resume_skill_payload(

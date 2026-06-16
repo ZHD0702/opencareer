@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { AlertCircle, Bot, BriefcaseBusiness, Building2, Check, Copy, ExternalLink, GraduationCap, Loader2, MapPin, RotateCcw, ThumbsDown, ThumbsUp, User } from "lucide-react"
 import ReactMarkdown from "react-markdown"
-import { useChatStore, type BrowserTaskState, type Message, type FeedbackType } from "../stores/chatStore"
+import { useChatStore, type Message, type FeedbackType } from "../stores/chatStore"
 import { useSessionStore } from "../stores/sessionStore"
 import { cn } from "../lib/utils"
 
@@ -38,9 +38,6 @@ function readApiError(data: unknown) {
         ? payload.message
         : "岗位搜索暂时失败",
     code: typeof detail.code === "string" ? detail.code : undefined,
-    queryPlan: detail.query_plan && typeof detail.query_plan === "object"
-      ? detail.query_plan as Record<string, unknown>
-      : undefined,
   }
 }
 
@@ -115,16 +112,13 @@ function MessageBubble({
   const isUser = msg.role === "user"
   const feedback = useChatStore((s) => s.messageFeedback[msg.id])
   const setFeedback = useChatStore((s) => s.setFeedback)
-  const setBrowserTask = useChatStore((s) => s.setBrowserTask)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const [copied, setCopied] = useState(false)
   const [showActions, setShowActions] = useState(false)
   const [startingMatch, setStartingMatch] = useState(false)
   const [jobMatches, setJobMatches] = useState<JobMatch[] | null>(null)
   const [matchError, setMatchError] = useState<string | null>(null)
-  const [matchNotice, setMatchNotice] = useState<string | null>(null)
   const [candidateCount, setCandidateCount] = useState(0)
-  const browserPollTokenRef = useRef(0)
   const displayContent = isUser ? msg.content : cleanAssistantContent(msg.content)
 
   const bubbleMaxW = "min(36rem, 64vw)"
@@ -143,43 +137,9 @@ function MessageBubble({
     setFeedback(msg.id, feedback === type ? null : type)
   }
 
-  useEffect(() => () => {
-    browserPollTokenRef.current += 1
-  }, [])
-
-  const pollBrowserMatches = async (taskId: string, token: number) => {
-    for (let attempt = 0; attempt < 150 && browserPollTokenRef.current === token; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1200))
-      const response = await fetch(`/api/browser-sessions/${taskId}`, { cache: "no-store" })
-      if (!response.ok) continue
-      const task = await response.json() as BrowserTaskState
-      setBrowserTask(task, false)
-      const matches = Array.isArray(task.matches) ? task.matches as unknown as JobMatch[] : []
-      if (matches.length > 0) {
-        setJobMatches(matches.slice(0, 5))
-        setCandidateCount(task.total_candidates || matches.length)
-        setMatchError(null)
-        setMatchNotice(null)
-        return
-      }
-      if (task.status === "needs_user") {
-        setMatchNotice("智联需要登录或安全验证，请在右侧完成后点击“登录后继续匹配”。")
-      } else if (task.status === "error" || task.status === "stopped") {
-        setMatchNotice(null)
-        setMatchError(task.error || task.status_text || "智联岗位搜索失败")
-        return
-      } else {
-        setMatchNotice(task.status_text || "正在从智联获取实时岗位…")
-      }
-    }
-  }
-
   const startJobMatching = async (action: NonNullable<Message["actions"]>[number]) => {
-    browserPollTokenRef.current += 1
-    const pollToken = browserPollTokenRef.current
     setStartingMatch(true)
     setMatchError(null)
-    setMatchNotice(null)
     try {
       const sessionId = useSessionStore.getState().sessionId
       if (!sessionId) return
@@ -191,24 +151,9 @@ function MessageBubble({
       const data = await response.json()
       if (!response.ok) {
         const apiError = readApiError(data)
-        if (apiError.code === "zhaopin_verification_required") {
-          const queryPlan = { ...action.query_plan, ...apiError.queryPlan }
-          const browserResponse = await fetch("/api/browser-sessions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: sessionId, ...queryPlan }),
-          })
-          const browserData = await browserResponse.json()
-          if (!browserResponse.ok) throw new Error(readApiError(browserData).message)
-          const task = browserData as BrowserTaskState
-          setBrowserTask(task, true)
-          setMatchNotice("正在通过智联页面获取实时岗位，若出现验证请在右侧完成。")
-          void pollBrowserMatches(task.id, pollToken)
-          return
-        }
         throw new Error(apiError.message)
       }
-      setJobMatches(data.matches || [])
+      setJobMatches((data.matches || []).slice(0, 5))
       setCandidateCount(data.total_candidates || 0)
     } catch (error) {
       console.error(error)
@@ -276,7 +221,6 @@ function MessageBubble({
         ))}
 
         {matchError && <div className="mt-2 flex max-w-xl items-start gap-2 rounded-md border border-red-300/60 bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/20 dark:text-red-300"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{matchError}</div>}
-        {matchNotice && <div className="mt-2 flex max-w-xl items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-200"><Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />{matchNotice}</div>}
 
         {jobMatches && <div className="mt-3 w-[min(36rem,64vw)] space-y-2">
           <div className="flex items-center justify-between px-1 text-xs text-muted-foreground"><span>实时匹配 · 从 {candidateCount} 个真实职位中筛选</span><span>智联招聘</span></div>

@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field
 
 from db.crud import get_session
 from services.job_search_readiness import evaluate_job_search_readiness
-from services.browser_session_service import browser_session_service
 from services.zhaopin_job_service import ZhaopinJobService, ZhaopinSearchError
 
 
@@ -42,20 +41,12 @@ async def match_jobs(payload: JobMatchRequest):
     try:
         result = await ZhaopinJobService().search_and_match(plan, payload.limit)
     except ZhaopinSearchError as exc:
-        browser_result = await browser_session_service.match_from_existing_session(
-            payload.session_id,
-            plan,
-            payload.limit,
-        )
-        if browser_result:
-            result = browser_result
-        else:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "message": str(exc),
-                    "code": "zhaopin_verification_required",
-                    "query_plan": plan,
-                },
-            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": str(exc),
+                "code": "zhaopin_search_failed",
+                "query_plan": plan,
+            },
+        ) from exc
     return {"session_id": payload.session_id, "query_plan": plan, **result}

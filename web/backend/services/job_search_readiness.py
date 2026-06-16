@@ -8,11 +8,11 @@ from services.resume_builder_service import ResumeBuilderService
 
 
 SEARCH_INTENT_PATTERNS = (
-    r"帮我找(?:一下)?(?:工作|岗位|职位)",
-    r"(?:找|搜|看看|推荐)(?:一下)?(?:合适的)?(?:工作|岗位|职位)",
-    r"有哪些.*(?:岗位|职位|工作)",
-    r"有没有.*(?:岗位|职位|工作)",
-    r"想找.*(?:工作|岗位|职位)",
+    r"帮我找.*(?:工作|岗位|职位|实习)",
+    r"(?:找|搜|看看|推荐|匹配).*(?:工作|岗位|职位|实习)",
+    r"有哪些.*(?:岗位|职位|工作|实习)",
+    r"有没有.*(?:岗位|职位|工作|实习)",
+    r"想找.*(?:工作|岗位|职位|实习)",
     r"匹配岗位",
 )
 
@@ -23,6 +23,18 @@ CITY_CODES = {
     "郑州": "719", "青岛": "702",
 }
 
+INTERNSHIP_INTENT_MARKERS = ("实习", "实习生", "暑期实习", "日常实习", "intern", "internship")
+FULLTIME_INTENT_MARKERS = ("全职", "正式", "社招", "校招", "应届生", "毕业生", "fulltime", "full-time")
+
+
+def _infer_employment_type(text: str) -> str:
+    lowered = text.lower()
+    if any(marker.lower() in lowered for marker in INTERNSHIP_INTENT_MARKERS):
+        return "实习"
+    if any(marker.lower() in lowered for marker in FULLTIME_INTENT_MARKERS):
+        return "全职"
+    return ""
+
 
 def evaluate_job_search_readiness(session_id: str) -> dict[str, Any]:
     state = ResumeBuilderService().load_state(session_id)
@@ -30,7 +42,9 @@ def evaluate_job_search_readiness(session_id: str) -> dict[str, Any]:
     basics = state.get("basics") or {}
     skills = list_skill_evidence(session_id)
     messages = get_messages(session_id, limit=100)
-    user_text = "\n".join(item["content"] for item in messages if item["role"] == "user")
+    user_messages = [item["content"] for item in messages if item["role"] == "user"]
+    user_text = "\n".join(user_messages)
+    latest_user_text = user_messages[0] if user_messages else ""
 
     role = (target.get("role") or "").strip()
     city = (target.get("city") or "").strip()
@@ -40,31 +54,37 @@ def evaluate_job_search_readiness(session_id: str) -> dict[str, Any]:
     )
     proven = [item for item in skills if item.get("status") == "proven"]
     known_skills = [item for item in skills if item.get("status") in {"proven", "mentioned"}]
-    requested = any(re.search(pattern, user_text, re.IGNORECASE) for pattern in SEARCH_INTENT_PATTERNS)
+    resume_skills = [
+        str(item).strip()
+        for item in (state.get("skills") or {}).get("hard") or []
+        if str(item).strip()
+    ]
+    requested = any(re.search(pattern, latest_user_text, re.IGNORECASE) for pattern in SEARCH_INTENT_PATTERNS)
 
     missing = []
     if not role:
         missing.append("target_role")
-    if not city:
-        missing.append("city")
     if not background_known:
         missing.append("background")
-    if len(known_skills) < 2:
+    if not known_skills and not resume_skills:
         missing.append("skills")
-    if not proven:
-        missing.append("proven_evidence")
 
     ready = not missing
-    top_skills = [item["skill_name"] for item in proven[:5]]
-    employment_type = "实习" if "实习" in user_text or "实习" in role else ""
+    top_skills = list(dict.fromkeys(
+        [item["skill_name"] for item in proven]
+        + [item["skill_name"] for item in known_skills]
+        + resume_skills
+    ))[:5]
+    search_city = city or "全国"
+    employment_type = _infer_employment_type(f"{role}\n{user_text}")
     return {
         "ready": ready,
         "requested": requested,
         "missing_fields": missing,
         "query_plan": {
             "role": role,
-            "city": city,
-            "city_code": CITY_CODES.get(city, CITY_CODES["全国"]),
+            "city": search_city,
+            "city_code": CITY_CODES.get(search_city, CITY_CODES["全国"]),
             "salary": target.get("salary_expectation"),
             "skills": top_skills,
             "employment_type": employment_type,
@@ -79,13 +99,6 @@ def build_job_match_action(session_id: str, allow_action: bool = True) -> dict[s
         return None
     assessment = evaluate_job_search_readiness(session_id)
     if not assessment["ready"] or not assessment["requested"]:
-        return None
-    existing_messages = get_messages(session_id, limit=100)
-    if any(
-        action.get("action") == "start_job_matching"
-        for message in existing_messages
-        for action in (message.get("actions") or [])
-    ):
         return None
     return {
         "action": "start_job_matching",

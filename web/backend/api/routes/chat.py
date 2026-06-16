@@ -141,13 +141,24 @@ async def chat_stream(session_id: str, request: Request):
         logger.info(f"保存用户消息到数据库")
         save_message(session_id, "user", user_message.strip())
         recent_messages = get_messages(session_id, limit=20)
+        previous_assistant_message = next(
+            (
+                msg["content"]
+                for msg in recent_messages
+                if msg["role"] == "ai"
+            ),
+            "",
+        )
         user_message_count = len([msg for msg in recent_messages if msg["role"] == "user"])
         if user_message_count == 1 and not session.get("title"):
             update_session(session_id, title=generate_session_title(user_message.strip()))
 
         emotion_guard = EmotionGuard()
         emotion_assessment = emotion_guard.assess(session_id, user_message.strip())
-        resume_pdf_requested = is_resume_pdf_request(user_message)
+        resume_pdf_requested = is_resume_pdf_request(
+            user_message,
+            previous_assistant_message,
+        )
         resume_service = ResumeBuilderService()
         if resume_pdf_requested:
             resume_update = resume_service.update_from_user_message(session_id, user_message.strip())

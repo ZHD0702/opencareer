@@ -20,6 +20,42 @@ _INITIAL_STATE_PATTERN = re.compile(
     re.DOTALL,
 )
 
+MAJOR_EXPANSION = {
+    "计算机": [
+        "计算机", "软件", "编程", "开发", "算法", "人工智能", "数据分析",
+        "后端", "前端", "测试", "运维", "网络", "Java", "Python", "C++",
+        "机器学习", "深度学习", "信息系统", "数据库", "IT", "信息管理",
+    ],
+    "软件": [
+        "软件", "编程", "开发", "后端", "前端", "测试", "数据库", "Java",
+        "Python", "C++", "Spring", "MySQL", "系统设计",
+    ],
+    "电子": ["电子", "电路", "嵌入式", "硬件", "芯片", "半导体"],
+    "通信": ["通信", "网络", "5G", "光纤", "无线"],
+    "自动化": ["自动化", "控制", "PLC", "机器人", "传感器"],
+    "机械": ["机械", "结构", "CAD", "制造", "工艺"],
+}
+
+CLI_PROFILE_WEIGHTS = {
+    "knowledge": 3.0,
+    "technology": 2.5,
+    "ability": 2.0,
+    "industry": 1.5,
+    "job_keywords": 2.0,
+    "job_position": 1.0,
+}
+
+INTERNSHIP_MARKERS = (
+    "实习", "实习生", "intern", "internship", "暑期实习", "日常实习",
+    "见习", "应届实习", "在校生", "可转正",
+)
+FULLTIME_MARKERS = (
+    "全职", "正式", "社招", "校招", "应届生", "毕业生", "full-time",
+    "fulltime", "经验", "年经验", "统招本科", "本科及以上",
+)
+PART_TIME_MARKERS = ("兼职", "临时", "小时工", "短期")
+ANTI_INTERNSHIP_MARKERS = ("不招实习", "非实习", "不接受实习", "实习勿扰")
+
 
 class ZhaopinSearchError(RuntimeError):
     pass
@@ -124,6 +160,116 @@ def build_search_queries(plan: dict[str, Any]) -> list[str]:
     for skill in supplemental_skills[:2]:
         queries.append(" ".join(part for part in (role, skill, employment_type) if part))
     return _unique_strings(queries)[:3]
+
+
+def _contains_any(text: str, markers: tuple[str, ...] | list[str]) -> bool:
+    lowered = text.lower()
+    return any(marker.lower() in lowered for marker in markers if marker)
+
+
+def _infer_expected_employment_type(plan: dict[str, Any]) -> str:
+    explicit = str(plan.get("employment_type") or "").strip().lower()
+    role = str(plan.get("role") or "").strip().lower()
+    text = " ".join([explicit, role])
+    if _contains_any(text, INTERNSHIP_MARKERS):
+        return "internship"
+    if _contains_any(text, FULLTIME_MARKERS):
+        return "fulltime"
+    if _contains_any(text, PART_TIME_MARKERS):
+        return "parttime"
+    return ""
+
+
+def _infer_job_employment_type(job: dict[str, Any], searchable: str) -> str:
+    text = " ".join([
+        str(job.get("title") or ""),
+        str(job.get("work_type") or ""),
+        str(job.get("experience") or ""),
+        str(job.get("education") or ""),
+        searchable,
+    ])
+    if _contains_any(text, ANTI_INTERNSHIP_MARKERS):
+        return "fulltime"
+    if (
+        bool(job.get("internship_months") or job.get("weekly_internship_days"))
+        or _contains_any(text, INTERNSHIP_MARKERS)
+    ):
+        return "internship"
+    if _contains_any(text, PART_TIME_MARKERS):
+        return "parttime"
+    if _contains_any(text, FULLTIME_MARKERS):
+        return "fulltime"
+    return "unknown"
+
+
+def _score_employment_fit(job: dict[str, Any], plan: dict[str, Any], searchable: str) -> tuple[int, str | None, str | None]:
+    expected = _infer_expected_employment_type(plan)
+    actual = _infer_job_employment_type(job, searchable)
+    if not expected:
+        return 0, None, None
+
+    labels = {
+        "internship": "实习",
+        "fulltime": "全职",
+        "parttime": "兼职",
+        "unknown": "未明确",
+    }
+    expected_label = labels.get(expected, expected)
+    actual_label = labels.get(actual, actual)
+
+    if expected == actual:
+        bonus = 24 if expected == "internship" else 18
+        return bonus, f"岗位类型匹配：{expected_label}", None
+
+    if actual == "unknown":
+        penalty = -14 if expected == "internship" else -6
+        return penalty, None, f"岗位类型未明确标注为{expected_label}"
+
+    penalty = -35 if expected == "internship" else -22
+    return penalty, None, f"岗位类型可能不匹配：你要{expected_label}，岗位更像{actual_label}"
+
+
+def _expanded_profile_keywords(plan: dict[str, Any]) -> list[str]:
+    role = str(plan.get("role") or "").strip()
+    major = str(plan.get("major") or "").strip()
+    industry = str(plan.get("industry") or "").strip()
+    skills = [str(item).strip() for item in plan.get("skills") or [] if str(item).strip()]
+
+    keywords = [role, industry, *skills, *_role_tokens(role)]
+    for major_key, words in MAJOR_EXPANSION.items():
+        if major_key.lower() in major.lower() or major_key.lower() in role.lower():
+            keywords.extend(words)
+    if major:
+        keywords.append(major)
+    return _unique_strings(keywords)
+
+
+def _score_cli_profile_fit(job: dict[str, Any], plan: dict[str, Any], searchable: str) -> tuple[float, list[str]]:
+    keywords = _expanded_profile_keywords(plan)
+    if not keywords:
+        return 0.0, []
+
+    job_skills = [str(item).strip() for item in [*(job.get("skills") or []), *(job.get("skill_tags") or [])] if str(item).strip()]
+    fields = {
+        "knowledge": " ".join([str(job.get("education") or ""), str(job.get("description") or "")]),
+        "technology": " ".join([str(job.get("title") or ""), " ".join(job_skills), str(job.get("description") or "")]),
+        "ability": str(job.get("description") or ""),
+        "industry": " ".join([str(job.get("industry") or ""), str(job.get("company") or "")]),
+        "job_keywords": searchable,
+        "job_position": str(job.get("title") or ""),
+    }
+    raw_score = 0.0
+    matched: list[str] = []
+    for field, weight in CLI_PROFILE_WEIGHTS.items():
+        field_text = fields[field].lower()
+        for keyword in keywords:
+            if keyword and keyword.lower() in field_text:
+                raw_score += weight
+                matched.append(keyword)
+
+    # CLI 原始分没有上限；GUI 中将它归一化为 0-30 的补充分。
+    normalized = min(30.0, raw_score * 1.6)
+    return normalized, _unique_strings(matched)[:6]
 
 
 @dataclass
@@ -263,12 +409,12 @@ class ZhaopinJobService:
 
 
 def score_job(job: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
-    title = job.get("title", "")
-    description = job.get("description", "")
-    searchable = " ".join([title, description, " ".join(job.get("skills") or [])]).lower()
+    title = str(job.get("title") or "")
+    description = str(job.get("description") or "")
+    job_skills = [str(item).strip() for item in [*(job.get("skills") or []), *(job.get("skill_tags") or [])] if str(item).strip()]
+    searchable = " ".join([title, description, " ".join(job_skills)]).lower()
     role = str(plan.get("role") or "").strip()
     skills = [str(item).strip() for item in plan.get("skills") or [] if str(item).strip()]
-    employment_type = str(plan.get("employment_type") or "").strip()
     city = str(plan.get("city") or "").strip()
     major = str(plan.get("major") or "").strip()
 
@@ -297,16 +443,12 @@ def score_job(job: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
     if missing_skills:
         concerns.append(f"暂未在职位描述中看到：{'、'.join(missing_skills[:3])}")
 
-    is_internship = bool(job.get("internship_months") or job.get("weekly_internship_days")) or any(
-        marker in searchable for marker in ("实习", "intern")
-    )
-    if employment_type == "实习":
-        if is_internship:
-            score += 20
-            reasons.append("职位明确支持实习")
-        else:
-            score -= 18
-            concerns.append("职位未明确标注为实习")
+    employment_score, employment_reason, employment_concern = _score_employment_fit(job, plan, searchable)
+    score += employment_score
+    if employment_reason:
+        reasons.append(employment_reason)
+    if employment_concern:
+        concerns.append(employment_concern)
 
     if city and (city in str(job.get("city") or "") or city in str(job.get("district") or "")):
         score += 8
@@ -345,16 +487,29 @@ def score_job(job: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
             score -= 12
             concerns.append("发布时间较早，投递前建议确认职位仍有效")
 
+    base_score = max(0, min(100, score))
+    cli_profile_score, cli_profile_matches = _score_cli_profile_fit(job, plan, searchable)
+    final_score = round(base_score * 0.7 + cli_profile_score)
+    if cli_profile_matches:
+        reasons.append(f"画像标签匹配：{'、'.join(cli_profile_matches[:4])}")
+
     result = dict(job)
-    result["match_score"] = max(0, min(100, score))
-    result["match_level"] = "高匹配" if score >= 75 else "较匹配" if score >= 55 else "可关注"
+    result["match_score"] = max(0, min(100, final_score))
+    result["base_rule_score"] = base_score
+    result["cli_profile_score"] = round(cli_profile_score, 1)
+    result["employment_fit"] = {
+        "expected": _infer_expected_employment_type(plan) or "unknown",
+        "actual": _infer_job_employment_type(job, searchable),
+        "score_delta": employment_score,
+    }
+    result["match_level"] = "高匹配" if final_score >= 75 else "较匹配" if final_score >= 55 else "可关注"
     result["match_reasons"] = reasons[:5]
     result["concerns"] = concerns[:3]
     result["matched_skills"] = matched_skills
     result["missing_profile_skills"] = missing_skills
+    result["matched_profile_keywords"] = cli_profile_matches
     result.pop("description", None)
     return result
-
 
 def _role_tokens(role: str) -> list[str]:
     ignored = {"工程师", "开发", "实习", "实习生", "岗位", "职位"}

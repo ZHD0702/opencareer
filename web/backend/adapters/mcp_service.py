@@ -5,7 +5,10 @@ import logging
 import subprocess
 import sys
 import socket
+import os
 from pathlib import Path
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,33 @@ class MCPService:
                 return s.connect_ex((self.host, self.port)) != 0
         except:
             return True
+
+    async def is_healthy(self) -> bool:
+        """Verify that the listener speaks MCP instead of only checking the port."""
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "opencareer-health", "version": "1.0"},
+            },
+        }
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
+                response = await client.post(
+                    f"http://{self.host}:{self.port}/mcp",
+                    json=payload,
+                    headers=headers,
+                )
+            return response.status_code == 200 and "jsonrpc" in response.text
+        except (httpx.HTTPError, asyncio.TimeoutError):
+            return False
     
     async def start_server(self):
         """启动 MCP 服务器 - 使用外面的 opencareer/mcp/server.py"""
@@ -37,8 +67,14 @@ class MCPService:
                 return False
             
             if not self.is_port_available():
-                logger.info(f"MCP port {self.host}:{self.port} already in use, assuming already running")
-                return True
+                if await self.is_healthy():
+                    logger.info(f"MCP server on {self.host}:{self.port} passed protocol health check")
+                    return True
+                logger.warning(f"MCP port {self.host}:{self.port} is occupied but not responding")
+                if self.process and self.process.poll() is None:
+                    await self.stop_server()
+                else:
+                    return False
             
             logger.info(f"Starting MCP server on {self.host}:{self.port}")
             
@@ -49,8 +85,13 @@ class MCPService:
                     "opencareer.mcp.server",
                 ],
                 cwd=str(project_root),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                env={
+                    **os.environ,
+                    "CAREER_MCP_HOST": self.host,
+                    "CAREER_MCP_PORT": str(self.port),
+                },
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
             )
             
@@ -58,12 +99,11 @@ class MCPService:
             for i in range(10):
                 await asyncio.sleep(0.5)
                 if self.process.poll() is None:
-                    if not self.is_port_available():
+                    if await self.is_healthy():
                         logger.info(f"MCP server started successfully on {self.host}:{self.port}")
                         return True
                 else:
-                    stderr = self.process.stderr.read().decode('utf-8', errors='ignore') if self.process.stderr else ''
-                    logger.error(f"MCP server failed to start: {stderr}")
+                    logger.error(f"MCP server failed to start with exit code {self.process.returncode}")
                     return False
             
             logger.warning("MCP server may not have started properly")

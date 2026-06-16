@@ -7,6 +7,7 @@ import re
 from api.schemas import CreateSessionRequest, SessionResponse
 from api.exceptions import SessionNotFoundException
 from db.crud import create_session, delete_session, get_messages, get_session, list_sessions
+from services.job_search_readiness import build_job_match_action
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -14,6 +15,17 @@ logger = logging.getLogger(__name__)
 
 def _clean_session_preview(content: str) -> str:
     return re.sub(r"\s*\[调用工具\s*[:：][^\]]+\]\s*", " ", content or "").strip()
+
+
+def _restore_latest_job_action(messages: list[dict], action: dict | None) -> list[dict]:
+    restored = [dict(message) for message in messages]
+    if not action or not restored or restored[-1].get("role") != "ai":
+        return restored
+    latest = restored[-1]
+    actions = list(latest.get("actions") or [])
+    if not any(item.get("action") == action["action"] for item in actions):
+        latest["actions"] = [*actions, action]
+    return restored
 
 
 @router.get("/sessions")
@@ -136,6 +148,10 @@ async def get_session_messages(session_id: str, limit: int = 200):
         safe_limit = max(1, min(limit, 500))
         messages = get_messages(session_id, limit=safe_limit)
         messages = list(reversed(messages))
+        messages = _restore_latest_job_action(
+            messages,
+            build_job_match_action(session_id),
+        )
 
         return {
             "session_id": session_id,
